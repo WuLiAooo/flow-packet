@@ -20,6 +20,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const getMessageByName = useProtoStore((s) => s.getMessageByName)
+  const routeMappings = useProtoStore((s) => s.routeMappings)
   const routeFields = useConnectionStore((s) => s.routeFields)
 
   if (!node) return null
@@ -49,11 +50,18 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
     updateNodeData(nodeId, { route: combineRoute(newValues, routeFields) })
   }
 
+  const routeFromBrowser = routeMappings.some(
+    (m) => m.requestMsg === node.data.messageName && m.route !== 0
+  )
+
   return (
     <div className="grid gap-3">
       {routeFields.length > 0 ? (
         <div className="grid gap-2">
           <Label>路由</Label>
+          {routeFromBrowser && (
+            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+          )}
           <div className="flex items-center gap-2">
             {routeFields.map((rf) => (
               <div key={rf.name} className="flex-1 grid gap-1">
@@ -61,6 +69,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
                 <Input
                   value={routeValues?.[rf.name] ?? 0}
                   onChange={(e) => handleRouteFieldChange(rf.name, Number(e.target.value) || 0)}
+                  disabled={routeFromBrowser}
                 />
               </div>
             ))}
@@ -69,10 +78,14 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
       ) : (
         <div className="grid gap-2">
           <Label htmlFor={`route-${nodeId}`}>路由</Label>
+          {routeFromBrowser && (
+            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+          )}
           <Input
             id={`route-${nodeId}`}
             value={node.data.route ?? 0}
             onChange={(e) => updateNodeData(nodeId, { route: Number(e.target.value) })}
+            disabled={routeFromBrowser}
           />
         </div>
       )}
