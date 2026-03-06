@@ -4,21 +4,23 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { uploadProtoFiles } from '@/services/api'
 import { useProtoStore } from '@/stores/protoStore'
+import { useConnectionStore } from '@/stores/connectionStore'
 
 export function ProtoImport() {
   const inputRef = useRef<HTMLInputElement>(null)
   const setFiles = useProtoStore((s) => s.setFiles)
   const setMessages = useProtoStore((s) => s.setMessages)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
     const protoFiles = files.filter((f) => f.name.endsWith('.proto'))
-    if (protoFiles.length === 0) return
+    if (protoFiles.length === 0 || !activeConnectionId) return
 
     try {
-      const result = await uploadProtoFiles(protoFiles)
+      const result = await uploadProtoFiles(protoFiles, activeConnectionId)
       setFiles(result.files || [])
       setMessages(result.messages || [])
     } catch (err) {

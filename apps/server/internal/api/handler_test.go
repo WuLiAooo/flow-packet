@@ -65,7 +65,7 @@ message Pong { int64 timestamp = 1; string message = 2; }
 	})
 
 	resp, err := http.Post(
-		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload", port),
+		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload?connectionId=conn_1_abc", port),
 		contentType,
 		body,
 	)
@@ -99,7 +99,7 @@ func TestProtoUploadInvalidFile(t *testing.T) {
 	})
 
 	resp, err := http.Post(
-		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload", port),
+		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload?connectionId=conn_1_abc", port),
 		contentType,
 		body,
 	)
@@ -121,7 +121,7 @@ func TestProtoUploadNoFiles(t *testing.T) {
 	writer.Close()
 
 	resp, err := http.Post(
-		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload", port),
+		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload?connectionId=conn_1_abc", port),
 		writer.FormDataContentType(),
 		body,
 	)
@@ -160,7 +160,7 @@ func TestProtoListEmpty(t *testing.T) {
 	}
 	defer ws.Close()
 
-	resp := wsRequest(t, ws, "1", "proto.list", nil)
+	resp := wsRequest(t, ws, "1", "proto.list", map[string]string{"connectionId": "conn_1_abc"})
 	if resp.Event != "proto.list" {
 		t.Fatalf("event = %q, want %q", resp.Event, "proto.list")
 	}
@@ -175,18 +175,21 @@ func TestRouteSetListDelete(t *testing.T) {
 	}
 	defer ws.Close()
 
+	connID := "conn_1_abc"
+
 	// 设置 route 映射
-	resp := wsRequest(t, ws, "1", "route.set", RouteMapping{
-		Route:       1001,
-		RequestMsg:  "game.LoginRequest",
-		ResponseMsg: "game.LoginResponse",
+	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
+		"connectionId": connID,
+		"route":        1001,
+		"requestMsg":   "game.LoginRequest",
+		"responseMsg":  "game.LoginResponse",
 	})
 	if resp.Event != "route.set" {
 		t.Fatalf("set event = %q, want %q", resp.Event, "route.set")
 	}
 
 	// 列出 route 映射
-	resp = wsRequest(t, ws, "2", "route.list", nil)
+	resp = wsRequest(t, ws, "2", "route.list", map[string]string{"connectionId": connID})
 	if resp.Event != "route.list" {
 		t.Fatalf("list event = %q, want %q", resp.Event, "route.list")
 	}
@@ -203,13 +206,13 @@ func TestRouteSetListDelete(t *testing.T) {
 	}
 
 	// 删除 route
-	resp = wsRequest(t, ws, "3", "route.delete", map[string]uint32{"route": 1001})
+	resp = wsRequest(t, ws, "3", "route.delete", map[string]any{"route": 1001, "connectionId": connID})
 	if resp.Event != "route.delete" {
 		t.Fatalf("delete event = %q, want %q", resp.Event, "route.delete")
 	}
 
 	// 验证已删除
-	resp = wsRequest(t, ws, "4", "route.list", nil)
+	resp = wsRequest(t, ws, "4", "route.list", map[string]string{"connectionId": connID})
 	payload, _ = json.Marshal(resp.Payload)
 	json.Unmarshal(payload, &listResult)
 	if len(listResult.Routes) != 0 {
@@ -227,9 +230,10 @@ func TestRouteSetInvalid(t *testing.T) {
 	defer ws.Close()
 
 	// route 为 0 应报错
-	resp := wsRequest(t, ws, "1", "route.set", RouteMapping{
-		Route:      0,
-		RequestMsg: "test",
+	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
+		"connectionId": "conn_1_abc",
+		"route":        0,
+		"requestMsg":   "test",
 	})
 	if resp.Event != "error" {
 		t.Fatalf("event = %q, want %q", resp.Event, "error")

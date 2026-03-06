@@ -20,14 +20,16 @@ export function RouteMapping() {
   const [newReqMsg, setNewReqMsg] = useState('')
   const [newRespMsg, setNewRespMsg] = useState('')
 
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+
   const handleAdd = async () => {
     const route = hasRouteFields
       ? combineRoute(newRouteValues, routeFields)
       : parseInt(newRoute)
-    if (!route || !newReqMsg) return
+    if (!route || !newReqMsg || !activeConnectionId) return
 
     try {
-      await setRouteMapping(route, newReqMsg, newRespMsg)
+      await setRouteMapping(route, newReqMsg, newRespMsg, activeConnectionId)
       addMapping({ route, requestMsg: newReqMsg, responseMsg: newRespMsg })
       setNewRoute('')
       setNewRouteValues({})
@@ -39,8 +41,9 @@ export function RouteMapping() {
   }
 
   const handleDelete = async (route: number) => {
+    if (!activeConnectionId) return
     try {
-      await deleteRouteMapping(route)
+      await deleteRouteMapping(route, activeConnectionId)
       removeMapping(route)
     } catch (err) {
       console.error('Delete route mapping failed:', err)

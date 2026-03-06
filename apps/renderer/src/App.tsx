@@ -15,7 +15,7 @@ import { LogPanel } from '@/components/execution/LogPanel'
 import { WelcomePage } from '@/components/connection/WelcomePage'
 import { initEventBindings } from '@/services/eventBindings'
 import { connect as wsConnect, setConnectionStatusCallback } from '@/services/ws'
-import { connectTCP } from '@/services/api'
+import { connectTCP, getProtoList, getRouteList } from '@/services/api'
 import { toast } from 'sonner'
 import { useTabStore } from '@/stores/tabStore'
 import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
@@ -26,11 +26,15 @@ import { ThemeToggle } from '@/components/layout/ThemeToggle'
 
 function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('画布')
-  const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const setActiveConnectionId = useConnectionStore((s) => s.setActiveConnectionId)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const addTab = useTabStore((s) => s.addTab)
   const addNode = useCanvasStore((s) => s.addNode)
   const routeMappings = useProtoStore((s) => s.routeMappings)
+  const setFiles = useProtoStore((s) => s.setFiles)
+  const setMessages = useProtoStore((s) => s.setMessages)
+  const setRouteMappings = useProtoStore((s) => s.setRouteMappings)
   const setConfig = useConnectionStore((s) => s.setConfig)
   const setRouteFields = useConnectionStore((s) => s.setRouteFields)
 
@@ -111,6 +115,15 @@ function App() {
     const routeFields = connection.frameConfig?.fields.filter((f) => f.isRoute) ?? []
     setRouteFields(routeFields)
 
+    // 加载该连接的 proto 文件和路由映射
+    getProtoList(connection.id).then((result: { files?: unknown[]; messages?: unknown[] }) => {
+      setFiles((result.files ?? []) as import('@/stores/protoStore').FileInfo[])
+      setMessages((result.messages ?? []) as import('@/stores/protoStore').MessageInfo[])
+    }).catch(() => {})
+    getRouteList(connection.id).then((result: { routes?: unknown[] }) => {
+      setRouteMappings((result.routes ?? []) as import('@/stores/protoStore').RouteMapping[])
+    }).catch(() => {})
+
     // 自动建立 TCP 连接，失败时 toast 提示但不阻塞进入画布
     connectTCP(connection.host, connection.port, {
       reconnect: true,
@@ -121,11 +134,14 @@ function App() {
         description: err instanceof Error ? err.message : String(err),
       })
     })
-  }, [setConfig, setTargetAddr, setRouteFields])
+  }, [setConfig, setTargetAddr, setRouteFields, setActiveConnectionId, setFiles, setMessages, setRouteMappings])
 
   const handleBackToWelcome = useCallback(() => {
+    setFiles([])
+    setMessages([])
+    setRouteMappings([])
     setActiveConnectionId(null)
-  }, [])
+  }, [setFiles, setMessages, setRouteMappings, setActiveConnectionId])
 
   // 欢迎页面 - 无活跃连接时显示
   if (!activeConnectionId) {

@@ -24,7 +24,7 @@ export async function getConnectionStatus() {
 }
 
 // Proto 管理
-export async function uploadProtoFiles(files: File[]) {
+export async function uploadProtoFiles(files: File[], connectionId: string) {
   const formData = new FormData()
   files.forEach((f) => {
     formData.append('files', f)
@@ -34,7 +34,7 @@ export async function uploadProtoFiles(files: File[]) {
     formData.append('paths', relPath ? relPath.replace(/\\/g, '/') : f.name)
   })
 
-  const resp = await fetch(`${API_BASE()}/api/proto/upload`, {
+  const resp = await fetch(`${API_BASE()}/api/proto/upload?connectionId=${encodeURIComponent(connectionId)}`, {
     method: 'POST',
     body: formData,
   })
@@ -51,26 +51,39 @@ export async function uploadProtoFiles(files: File[]) {
   return resp.json()
 }
 
-export async function getProtoList() {
-  return sendRequest('proto.list')
+export async function getProtoList(connectionId: string) {
+  return sendRequest('proto.list', { connectionId })
 }
 
 // Route 映射
-export async function getRouteList() {
-  return sendRequest('route.list')
+export async function getRouteList(connectionId: string) {
+  return sendRequest('route.list', { connectionId })
 }
 
-export async function setRouteMapping(route: number, requestMsg: string, responseMsg: string) {
-  return sendRequest('route.set', { route, requestMsg, responseMsg })
+export async function setRouteMapping(route: number, requestMsg: string, responseMsg: string, connectionId: string) {
+  return sendRequest('route.set', { route, requestMsg, responseMsg, connectionId })
 }
 
-export async function deleteRouteMapping(route: number) {
-  return sendRequest('route.delete', { route })
+export async function deleteRouteMapping(route: number, connectionId: string) {
+  return sendRequest('route.delete', { route, connectionId })
+}
+
+// 模板管理
+export async function getTemplateList() {
+  return sendRequest('template.list')
+}
+
+export async function saveTemplate(name: string, fields: { name: string; bytes: number; isRoute?: boolean; isSeq?: boolean }[], byteOrder?: string) {
+  return sendRequest('template.save', { name, fields, byteOrder })
+}
+
+export async function deleteTemplate(id: string) {
+  return sendRequest('template.delete', { id })
 }
 
 // 流程执行
-export async function executeFlow(nodes: unknown[], edges: unknown[]) {
-  return sendRequest('flow.execute', { nodes, edges })
+export async function executeFlow(nodes: unknown[], edges: unknown[], connectionId: string) {
+  return sendRequest('flow.execute', { nodes, edges, connectionId })
 }
 
 export async function stopFlow() {

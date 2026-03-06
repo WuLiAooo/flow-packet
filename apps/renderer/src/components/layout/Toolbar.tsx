@@ -28,6 +28,7 @@ interface ToolbarProps {
 export function Toolbar({ onBack }: ToolbarProps) {
   const connState = useConnectionStore((s) => s.state)
   const targetAddr = useConnectionStore((s) => s.targetAddr)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const execStatus = useExecutionStore((s) => s.status)
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
@@ -36,7 +37,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
   const isConnected = connState === 'connected'
 
   const handleRun = async () => {
-    if (!isConnected || isRunning || nodes.length === 0) return
+    if (!isConnected || isRunning || nodes.length === 0 || !activeConnectionId) return
     try {
       const flowNodes = nodes.map((n) => ({
         id: n.id,
@@ -47,7 +48,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
       const flowEdges = edges
         .filter((e) => e.type === 'execEdge')
         .map((e) => ({ source: e.source, target: e.target }))
-      await executeFlow(flowNodes, flowEdges)
+      await executeFlow(flowNodes, flowEdges, activeConnectionId)
     } catch {
       // handled by event
     }

@@ -17,11 +17,13 @@ interface ConnectionStore {
   config: ConnectionConfig
   targetAddr: string
   routeFields: FrameField[]
+  activeConnectionId: string | null
 
   setState: (state: ConnState) => void
   setConfig: (config: Partial<ConnectionConfig>) => void
   setTargetAddr: (addr: string) => void
   setRouteFields: (fields: FrameField[]) => void
+  setActiveConnectionId: (id: string | null) => void
 }
 
 export const useConnectionStore = create<ConnectionStore>((set) => ({
@@ -36,10 +38,12 @@ export const useConnectionStore = create<ConnectionStore>((set) => ({
   },
   targetAddr: '',
   routeFields: [],
+  activeConnectionId: null,
 
   setState: (state) => set({ state }),
   setConfig: (config) =>
     set((s) => ({ config: { ...s.config, ...config } })),
   setTargetAddr: (addr) => set({ targetAddr: addr }),
   setRouteFields: (fields) => set({ routeFields: fields }),
+  setActiveConnectionId: (id) => set({ activeConnectionId: id }),
 }))
