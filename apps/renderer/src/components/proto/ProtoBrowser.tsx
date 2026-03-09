@@ -65,18 +65,21 @@ export function ProtoBrowser() {
         <ProtoImport />
       </div>
 
-      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
-        <SidebarGroup className="px-0">
-          <SidebarGroupLabel>Proto 文件</SidebarGroupLabel>
-          <div className="relative px-2 pb-1">
-            <Search className="absolute left-4 top-0 h-7 w-3.5 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索协议或消息..."
-              className="h-7 pl-7 text-xs"
-            />
-          </div>
+      <div className="shrink-0 px-2 text-xs font-medium text-muted-foreground mb-1">
+        Proto 文件
+      </div>
+      <div className="relative shrink-0" style={{ padding: '0 8px 6px' }}>
+        <Search className="absolute left-[18px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索协议或消息..."
+          className="h-7 pl-7 text-xs"
+        />
+      </div>
+
+      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-h-full">
+        <SidebarGroup className="pt-0" style={{ padding: '0 8px' }}>
           <SidebarGroupContent>
             <SidebarMenu>
               {filteredFiles.map((file) => (
