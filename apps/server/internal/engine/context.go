@@ -32,7 +32,7 @@ func (c *SeqContext) NextSeq() (uint32, chan []byte) {
 	return seq, ch
 }
 
-// Resolve 收到响应后，通过 seq 匹配到等待方
+// Resolve 收到响应后, 通过 seq 匹配到等待方
 func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	c.mu.Lock()
 	ch, ok := c.pending[seq]
@@ -49,8 +49,8 @@ func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	return true
 }
 
-// ResolveFirst 当 seq 无法精确匹配时，解析最早的等待请求
-// 适用于服务端不回传 seq 的协议（响应 seq=0）
+// ResolveFirst 当 seq 无法精确匹配时, 解析最早的等待请求
+// 适用于服务端不回传 seq 的协议(响应 seq=0)
 func (c *SeqContext) ResolveFirst(data []byte) bool {
 	c.mu.Lock()
 	var minSeq uint32
@@ -74,7 +74,7 @@ func (c *SeqContext) ResolveFirst(data []byte) bool {
 	return true
 }
 
-// WaitResponse 等待指定 seq 的响应，超时返回错误
+// WaitResponse 等待指定 seq 的响应, 超时返回错误
 func (c *SeqContext) WaitResponse(ch chan []byte, timeout time.Duration) ([]byte, error) {
 	select {
 	case data := <-ch:

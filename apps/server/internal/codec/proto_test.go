@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// compileProto 编译 proto 内容，返回指定 message 的 descriptor
+// compileProto 编译 proto 内容, 返回指定 message 的 descriptor
 func compileProto(t *testing.T, content, msgName string) protoreflect.MessageDescriptor {
 	t.Helper()
 

@@ -20,13 +20,13 @@ type FieldDef struct {
 type FieldDrivenConfig struct {
 	Fields      []FieldDef
 	SizeIndex   int   // size/len 字段的索引
-	SeqIndex    int   // seq 字段的索引（-1 无）
+	SeqIndex    int   // seq 字段的索引(-1 无)
 	RouteFields []int // route 字段的索引列表
-	HeaderSize  int   // 所有 header 字段（不含 payload body）的总字节数
+	HeaderSize  int   // 所有 header 字段(不含 payload body)的总字节数
 	SizeBytes   int   // size 字段的字节数
 }
 
-// NewFieldDrivenConfig 根据字段定义构建配置，自动检测 size/seq/route 字段索引
+// NewFieldDrivenConfig 根据字段定义构建配置, 自动检测 size/seq/route 字段索引
 func NewFieldDrivenConfig(fields []FieldDef) (*FieldDrivenConfig, error) {
 	cfg := &FieldDrivenConfig{
 		Fields:    fields,
@@ -60,8 +60,8 @@ func NewFieldDrivenConfig(fields []FieldDef) (*FieldDrivenConfig, error) {
 
 // PacketConfig 协议帧配置
 type PacketConfig struct {
-	RouteBytes  int                // legacy Due: route 字段字节数
-	SeqBytes    int                // legacy Due: seq 字段字节数
+	RouteBytes  int                // route 字段字节数
+	SeqBytes    int                // seq 字段字节数
 	FieldDriven *FieldDrivenConfig // 非 nil 时启用字段驱动模式
 }
 
@@ -83,11 +83,11 @@ const headerSize = 5
 
 // Packet 解析后的数据包
 type Packet struct {
-	Heartbeat bool   // 是否为心跳包（header 中 h=1）
+	Heartbeat bool   // 是否为心跳包(header 中 h=1)
 	ExtCode   uint8  // 扩展操作码 (7 bits)
-	Route     uint32 // 消息路由（仅数据包）
-	Seq       uint32 // 消息序列号（仅数据包）
-	Data      []byte // 消息体（数据包）或心跳时间（心跳包）
+	Route     uint32 // 消息路由(仅数据包)
+	Seq       uint32 // 消息序列号(仅数据包)
+	Data      []byte // 消息体(数据包)或心跳时间(心跳包)
 }
 
 // IsHeartbeat 返回是否为心跳包
@@ -96,7 +96,7 @@ func (p *Packet) IsHeartbeat() bool {
 }
 
 // Encode 将数据包编码为二进制帧
-// 字段驱动模式：按 FieldDrivenConfig 定义小端编码
+// 字段驱动模式: 按 FieldDrivenConfig 定义小端编码
 // Legacy Due 模式: size(4B) + header(1B: h=0 + extcode) + route + seq + message data
 func Encode(pkt *Packet, cfg PacketConfig) ([]byte, error) {
 	if cfg.IsFieldDriven() {
@@ -114,7 +114,7 @@ func encodeHeartbeat(pkt *Packet) ([]byte, error) {
 	payloadSize := 1
 	buf := make([]byte, 4+payloadSize)
 
-	// size（不包含 size 字段自身）
+	// size(不包含 size 字段自身)
 	binary.BigEndian.PutUint32(buf[0:4], uint32(payloadSize))
 
 	// header: h=1 + extcode
@@ -133,7 +133,7 @@ func encodeData(pkt *Packet, cfg PacketConfig) ([]byte, error) {
 	payloadSize := 1 + cfg.RouteBytes + cfg.SeqBytes + len(pkt.Data)
 	buf := make([]byte, 4+payloadSize)
 
-	// size（不包含 size 字段自身）
+	// size(不包含 size 字段自身)
 	binary.BigEndian.PutUint32(buf[0:4], uint32(payloadSize))
 
 	// header: h=0 + extcode
@@ -248,7 +248,7 @@ func DecodeBytes(data []byte, cfg PacketConfig) (*Packet, error) {
 	return pkt, nil
 }
 
-// Decoder 协议帧解码器，从 io.Reader 中持续读取并解码帧
+// Decoder 协议帧解码器, 从 io.Reader 中持续读取并解码帧
 type Decoder struct {
 	reader io.Reader
 	cfg    PacketConfig
@@ -293,14 +293,14 @@ func (d *Decoder) Decode() (*Packet, error) {
 	}
 
 	if isHeartbeat {
-		// 心跳包：剩余数据为 heartbeat time（如有）
+		// 心跳包: 剩余数据为 heartbeat time(如有)
 		if len(payload) > 1 {
 			pkt.Data = payload[1:]
 		}
 		return pkt, nil
 	}
 
-	// 4. 数据包：解析 route + seq + message data
+	// 4. 数据包: 解析 route + seq + message data
 	offset := 1
 	minSize := 1 + d.cfg.RouteBytes + d.cfg.SeqBytes
 	if int(payloadSize) < minSize {
@@ -322,7 +322,7 @@ func (d *Decoder) Decode() (*Packet, error) {
 	return pkt, nil
 }
 
-// ---- 字段驱动模式（小端序）----
+// ---- 字段驱动模式(小端序) ----
 
 // putUintNLE 以小端序将 val 写入 buf 的前 n 字节
 func putUintNLE(buf []byte, val uint32, n int) {
@@ -351,7 +351,7 @@ func readUintNLE(buf []byte, n int) uint32 {
 }
 
 // splitRouteToFields 将组合路由值拆分为各路由字段值
-// 逆向前端 combineRoute：从右往左按字段字节数依次提取
+// 逆向前端 combineRoute: 从右往左按字段字节数依次提取
 func splitRouteToFields(route uint32, cfg *FieldDrivenConfig) map[int]uint32 {
 	result := make(map[int]uint32)
 	value := route
@@ -375,8 +375,8 @@ func combineRouteFromFields(values map[int]uint32, cfg *FieldDrivenConfig) uint3
 	return result
 }
 
-// fieldDrivenEncode 字段驱动编码（小端序）
-// 帧格式：header fields（按字段定义）+ payload body
+// fieldDrivenEncode 字段驱动编码(小端序)
+// 帧格式: header fields(按字段定义) + payload body
 // size 字段的值 = payload body 的字节数
 func fieldDrivenEncode(pkt *Packet, cfg *FieldDrivenConfig) ([]byte, error) {
 	totalSize := cfg.HeaderSize + len(pkt.Data)

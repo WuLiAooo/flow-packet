@@ -226,7 +226,7 @@ func TestDecodeSplitPacket(t *testing.T) {
 	pkt := &Packet{Route: 1001, Seq: 1, Data: []byte("test")}
 	encoded, _ := Encode(pkt, cfg)
 
-	// 使用管道模拟拆包（分次写入）
+	// 使用管道模拟拆包(分次写入)
 	pr, pw := io.Pipe()
 
 	go func() {
@@ -483,7 +483,7 @@ func TestFieldDrivenSplitPacket(t *testing.T) {
 	pr, pw := io.Pipe()
 
 	go func() {
-		// 分两次写入：先写 header 的前半段，再写剩余
+		// 分两次写入: 先写 header 的前半段, 再写剩余
 		pw.Write(encoded[:5])
 		pw.Write(encoded[5:])
 		pw.Close()

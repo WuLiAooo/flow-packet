@@ -10,7 +10,7 @@ import (
 	"github.com/flow-packet/server/internal/codec"
 )
 
-// startEchoServer 启动一个简单的 TCP 回声服务器，收到数据后原样返回
+// startEchoServer 启动一个简单的 TCP 回声服务器, 收到数据后原样返回
 func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -70,7 +70,7 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 	}
 }
 
-// startSendServer 启动一个 TCP 服务器，接受连接后主动发送指定数据
+// startSendServer 启动一个 TCP 服务器, 接受连接后主动发送指定数据
 func startSendServer(t *testing.T, data []byte) (addr string, cleanup func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -90,7 +90,6 @@ func startSendServer(t *testing.T, data []byte) (addr string, cleanup func()) {
 		}
 		defer conn.Close()
 		conn.Write(data)
-		// keep connection open until done
 		<-done
 	}()
 

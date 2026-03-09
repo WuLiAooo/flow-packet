@@ -8,10 +8,10 @@ import (
 // ReconnectConfig 重连配置
 type ReconnectConfig struct {
 	Enable      bool          // 是否启用重连
-	InitialWait time.Duration // 初始等待时间（默认 1s）
-	MaxWait     time.Duration // 最大等待时间（默认 30s）
-	MaxRetries  int           // 最大重试次数（默认 10，0 表示无限制）
-	Multiplier  float64       // 退避倍数（默认 2.0）
+	InitialWait time.Duration // 初始等待时间(默认 1s)
+	MaxWait     time.Duration // 最大等待时间(默认 30s)
+	MaxRetries  int           // 最大重试次数(默认 10, 0 表示无限制)
+	Multiplier  float64       // 退避倍数(默认 2.0)
 }
 
 // DefaultReconnectConfig 默认重连配置
@@ -42,7 +42,7 @@ func NewReconnector(cfg ReconnectConfig) *Reconnector {
 	}
 }
 
-// BackoffDuration 计算第 n 次重试的退避等待时间（从 0 开始计数）
+// BackoffDuration 计算第 n 次重试的退避等待时间(从 0 开始计数)
 func (r *Reconnector) BackoffDuration(retry int) time.Duration {
 	wait := r.cfg.InitialWait
 	for i := 0; i < retry; i++ {
@@ -55,7 +55,7 @@ func (r *Reconnector) BackoffDuration(retry int) time.Duration {
 	return wait
 }
 
-// Start 启动重连流程，每次尝试调用 connectFn，成功后调用 onSuccess，达到上限调用 onGiveUp
+// Start 启动重连流程, 每次尝试调用 connectFn, 成功后调用 onSuccess, 达到上限调用 onGiveUp
 func (r *Reconnector) Start(connectFn func() error, onSuccess func(), onGiveUp func(retries int)) {
 	r.mu.Lock()
 	if !r.cfg.Enable || r.stopped {
@@ -84,7 +84,7 @@ func (r *Reconnector) Stop() {
 	}
 }
 
-// Reset 重置重连器状态，以便复用
+// Reset 重置重连器状态, 以便复用
 func (r *Reconnector) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

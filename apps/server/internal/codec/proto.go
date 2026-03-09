@@ -11,7 +11,6 @@ import (
 )
 
 // DynamicEncode 使用动态消息将字段值编码为 Protobuf 字节数组
-// fields 是字段名 → 值的映射，值可以是基础类型、map[string]any（嵌套消息）、[]any（repeated）
 func DynamicEncode(md protoreflect.MessageDescriptor, fields map[string]any) ([]byte, error) {
 	msg := dynamicpb.NewMessage(md)
 
@@ -23,7 +22,7 @@ func DynamicEncode(md protoreflect.MessageDescriptor, fields map[string]any) ([]
 }
 
 // DynamicDecode 将 Protobuf 字节数组解码为 JSON 友好的 map
-// 如果 md 为 nil，返回十六进制字符串
+// 如果 md 为 nil, 返回十六进制字符串
 func DynamicDecode(data []byte, md protoreflect.MessageDescriptor) (map[string]any, error) {
 	if md == nil {
 		return map[string]any{

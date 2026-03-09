@@ -14,7 +14,7 @@ import (
 // ParseResult 解析结果
 type ParseResult struct {
 	Files           []FileInfo                        // 按文件分组的 message 信息
-	fileDescriptors []protoreflect.FileDescriptor     // 编译后的文件描述符（用于运行时查找）
+	fileDescriptors []protoreflect.FileDescriptor     // 编译后的文件描述符(用于运行时查找)
 }
 
 // FileInfo 文件级别信息
@@ -27,8 +27,8 @@ type FileInfo struct {
 
 // MessageInfo 描述一个 Protobuf message
 type MessageInfo struct {
-	Name       string        // 全限定名称（package.MessageName）
-	ShortName  string        // 短名称（MessageName）
+	Name       string        // 全限定名称(package.MessageName)
+	ShortName  string        // 短名称(MessageName)
 	Fields     []FieldInfo   // 字段列表
 	Oneofs     []OneofInfo   // oneof 组
 	NestedMsgs []MessageInfo // 嵌套 message
@@ -39,8 +39,8 @@ type MessageInfo struct {
 type FieldInfo struct {
 	Name       string `json:"name"`
 	Number     int    `json:"number"`
-	Type       string `json:"type"`       // 类型名称（int32, string, MessageName 等）
-	Kind       string `json:"kind"`       // proto kind（message, enum, scalar 等）
+	Type       string `json:"type"`       // 类型名称(int32, string, MessageName 等)
+	Kind       string `json:"kind"`       // proto kind(message, enum, scalar 等)
 	IsRepeated bool   `json:"isRepeated"` // 是否 repeated
 	IsOptional bool   `json:"isOptional"` // 是否 optional
 	IsMap      bool   `json:"isMap"`      // 是否 map 类型
@@ -67,7 +67,7 @@ type EnumValueInfo struct {
 	Number int    `json:"number"`
 }
 
-// ParseProtoFiles 解析 .proto 文件列表，返回所有 message 定义
+// ParseProtoFiles 解析 .proto 文件列表, 返回所有 message 定义
 func ParseProtoFiles(paths []string) (*ParseResult, error) {
 	if len(paths) == 0 {
 		return &ParseResult{}, nil
@@ -76,7 +76,7 @@ func ParseProtoFiles(paths []string) (*ParseResult, error) {
 	// 收集所有 proto 文件所在的目录作为导入路径
 	importPaths := collectImportPaths(paths)
 
-	// 提取文件名（相对路径）
+	// 提取文件名(相对路径)
 	fileNames := make([]string, len(paths))
 	for i, p := range paths {
 		fileNames[i] = filepath.Base(p)
@@ -106,16 +106,16 @@ func ParseProtoFiles(paths []string) (*ParseResult, error) {
 	return result, nil
 }
 
-// ParseProtoDir 遍历 rootDir 目录树中所有 .proto 文件，以 rootDir 为 import path 统一编译。
-// 同时将所有包含 .proto 文件的父目录也加入 import paths，
-// 以兼容用户选择不同层级文件夹上传的情况。
+// ParseProtoDir 遍历 rootDir 目录树中所有 .proto 文件, 以 rootDir 为 import path 统一编译
+// 同时将所有包含 .proto 文件的父目录也加入 import paths,
+// 以兼容用户选择不同层级文件夹上传的情况
 func ParseProtoDir(rootDir string) (*ParseResult, error) {
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve root dir: %w", err)
 	}
 
-	// 收集所有 .proto 文件的相对路径，以及它们的父目录
+	// 收集所有 .proto 文件的相对路径, 以及它们的父目录
 	var relPaths []string
 	parentDirs := make(map[string]bool)
 	err = filepath.Walk(absRoot, func(path string, info os.FileInfo, err error) error {
@@ -129,7 +129,7 @@ func ParseProtoDir(rootDir string) (*ParseResult, error) {
 			}
 			// protocompile 需要正斜杠路径
 			relPaths = append(relPaths, filepath.ToSlash(rel))
-			// 记录包含 .proto 的目录（绝对路径）
+			// 记录包含 .proto 的目录(绝对路径)
 			parentDirs[filepath.Dir(path)] = true
 		}
 		return nil
@@ -142,9 +142,9 @@ func ParseProtoDir(rootDir string) (*ParseResult, error) {
 		return &ParseResult{}, nil
 	}
 
-	// 构建 import paths：rootDir 优先，再加上所有包含 .proto 的目录
-	// 这样 import "source/X.proto" 既能从 rootDir 解析（source/ 是子目录），
-	// 也能从 .proto 文件所在目录解析（用户直接选了子文件夹上传的情况）
+	// 构建 import paths: rootDir 优先, 再加上所有包含 .proto 的目录
+	// 这样 import "source/X.proto" 既能从 rootDir 解析(source/ 是子目录),
+	// 也能从 .proto 文件所在目录解析(用户直接选了子文件夹上传的情况)
 	importPaths := []string{absRoot}
 	for dir := range parentDirs {
 		if dir != absRoot {
@@ -241,7 +241,7 @@ func findMsgInDescriptors(msgs protoreflect.MessageDescriptors, name protoreflec
 	return nil
 }
 
-// AllMessages 返回解析结果中所有 message（扁平化，包含嵌套）
+// AllMessages 返回解析结果中所有 message(扁平化, 包含嵌套)
 func (r *ParseResult) AllMessages() []MessageInfo {
 	var all []MessageInfo
 	for _, f := range r.Files {

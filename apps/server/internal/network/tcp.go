@@ -7,13 +7,13 @@ import (
 	"github.com/flow-packet/server/internal/codec"
 )
 
-// TCPClient TCP 客户端，实现 Client 接口
-// 采用读写 goroutine 分离模型，集成协议帧 Decoder 进行收包
+// TCPClient TCP 客户端, 实现 Client 接口
+// 采用读写 goroutine 分离模型, 集成协议帧 Decoder 进行收包
 type TCPClient struct {
 	mu    sync.RWMutex
 	state ConnState
 	conn  net.Conn
-	addr  string // 目标地址，用于重连
+	addr  string // 目标地址, 用于重连
 
 	packetCfg    codec.PacketConfig
 	reconnectCfg ReconnectConfig
@@ -86,7 +86,7 @@ func (c *TCPClient) Connect(addr string) error {
 	return nil
 }
 
-// Disconnect 断开连接（主动断开不触发重连）
+// Disconnect 断开连接(主动断开不触发重连)
 func (c *TCPClient) Disconnect() error {
 	// 停止重连器
 	if c.reconnector != nil {
@@ -155,7 +155,7 @@ func (c *TCPClient) OnReceive(handler ReceiveHandler) {
 	c.receiveHandler = handler
 }
 
-// readLoop 读 goroutine，使用 codec.Decoder 解码帧
+// readLoop 读 goroutine, 使用 codec.Decoder 解码帧
 func (c *TCPClient) readLoop(conn *tcpConnWrapper) {
 	decoder := codec.NewDecoder(conn.conn, c.packetCfg)
 
@@ -183,7 +183,7 @@ func (c *TCPClient) readLoop(conn *tcpConnWrapper) {
 	}
 }
 
-// writeLoop 写 goroutine，从 sendCh 读取数据写入连接
+// writeLoop 写 goroutine, 从 sendCh 读取数据写入连接
 func (c *TCPClient) writeLoop(conn *tcpConnWrapper) {
 	for {
 		select {
@@ -198,7 +198,7 @@ func (c *TCPClient) writeLoop(conn *tcpConnWrapper) {
 	}
 }
 
-// handleDisconnect 处理断开连接，并在配置启用时触发重连
+// handleDisconnect 处理断开连接, 并在配置启用时触发重连
 func (c *TCPClient) handleDisconnect(conn *tcpConnWrapper, err error) {
 	c.mu.Lock()
 	if c.state == ConnStateDisconnected {

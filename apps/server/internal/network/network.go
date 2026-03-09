@@ -1,9 +1,9 @@
-// Package network 提供网络层统一接口与 TCP/WebSocket 实现，参考 dobyte/due 的接口抽象
+// Package network 提供网络层统一接口与 TCP/WebSocket 实现
 package network
 
 import "net"
 
-// Conn 连接接口，抽象不同传输协议的连接
+// Conn 连接接口, 抽象不同传输协议的连接
 type Conn interface {
 	// Read 读取数据
 	Read(b []byte) (n int, err error)
@@ -52,7 +52,7 @@ type DisconnectHandler func(conn Conn, err error)
 // ReceiveHandler 数据接收回调
 type ReceiveHandler func(conn Conn, data []byte)
 
-// Client 客户端接口，管理到远端服务器的连接
+// Client 客户端接口, 管理到远端服务器的连接
 type Client interface {
 	// Connect 建立连接
 	Connect(addr string) error
@@ -63,20 +63,6 @@ type Client interface {
 	// State 获取当前连接状态
 	State() ConnState
 	// OnConnect 注册连接建立回调
-	OnConnect(handler ConnectHandler)
-	// OnDisconnect 注册连接断开回调
-	OnDisconnect(handler DisconnectHandler)
-	// OnReceive 注册数据接收回调
-	OnReceive(handler ReceiveHandler)
-}
-
-// Server 服务端接口，监听并接受连接
-type Server interface {
-	// Start 启动服务，开始监听指定地址
-	Start(addr string) error
-	// Stop 停止服务
-	Stop() error
-	// OnConnect 注册新连接回调
 	OnConnect(handler ConnectHandler)
 	// OnDisconnect 注册连接断开回调
 	OnDisconnect(handler DisconnectHandler)

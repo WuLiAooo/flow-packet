@@ -10,8 +10,8 @@ import (
 // HeartbeatConfig 心跳配置
 type HeartbeatConfig struct {
 	Enable   bool          // 是否启用心跳
-	Interval time.Duration // 心跳发送间隔（默认 15s）
-	Timeout  time.Duration // 心跳超时时间（默认 45s）
+	Interval time.Duration // 心跳发送间隔(默认 15s)
+	Timeout  time.Duration // 心跳超时时间(默认 45s)
 }
 
 // DefaultHeartbeatConfig 默认心跳配置
@@ -23,7 +23,7 @@ func DefaultHeartbeatConfig() HeartbeatConfig {
 	}
 }
 
-// Heartbeat 心跳模块，独立 goroutine 定时发送心跳并监测超时
+// Heartbeat 心跳模块, 独立 goroutine 定时发送心跳并监测超时
 type Heartbeat struct {
 	cfg       HeartbeatConfig
 	packetCfg codec.PacketConfig
@@ -84,7 +84,7 @@ func (h *Heartbeat) Stop() {
 	close(h.stopCh)
 }
 
-// Feed 喂狗——更新最后接收心跳时间
+// Feed 更新最后接收心跳时间
 func (h *Heartbeat) Feed() {
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -66,7 +67,7 @@ func (s *Server) HandleHTTP(pattern string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(pattern, handler)
 }
 
-// Start 启动服务器。port > 0 时监听指定端口，port == 0 时动态分配。
+// Start 启动服务器, port > 0 时监听指定端口, port == 0 时动态分配
 func (s *Server) Start(port ...int) (int, error) {
 	addr := "127.0.0.1:0"
 	if len(port) > 0 && port[0] > 0 {
@@ -140,6 +141,7 @@ func (s *Server) routeMessage(msg ClientMessage) ServerMessage {
 	s.mu.RUnlock()
 
 	if !ok {
+		log.Printf("[ERR] unknown action: %s", msg.Action)
 		return ServerMessage{
 			ID:    msg.ID,
 			Event: "error",
@@ -151,6 +153,7 @@ func (s *Server) routeMessage(msg ClientMessage) ServerMessage {
 
 	result, err := handler(msg.Payload)
 	if err != nil {
+		log.Printf("[ERR] %s: %v", msg.Action, err)
 		return ServerMessage{
 			ID:    msg.ID,
 			Event: "error",

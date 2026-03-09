@@ -90,7 +90,7 @@ func (r *Runner) SetTimeout(d time.Duration) {
 	r.timeout = d
 }
 
-// SeqCtx 获取 seq 上下文（供外部匹配响应）
+// SeqCtx 获取 seq 上下文(供外部匹配响应)
 func (r *Runner) SeqCtx() *SeqContext {
 	return r.seqCtx
 }
@@ -102,7 +102,7 @@ func (r *Runner) Running() bool {
 	return r.running
 }
 
-// ResolveOrder 解析执行顺序，返回有序节点 ID 列表
+// ResolveOrder 解析执行顺序, 返回有序节点 ID 列表
 func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("empty node list")
@@ -123,7 +123,7 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 		inDegree[e.Target]++
 	}
 
-	// 找起点（入度为 0 的节点）
+	// 找起点(入度为 0 的节点)
 	var starts []string
 	for id, deg := range inDegree {
 		if deg == 0 {
@@ -288,7 +288,7 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 		return result
 	}
 
-	// 解码响应：有 responseResolver 时尝试结构化解码，否则退化为 hex
+	// 解码响应: 有 responseResolver 时尝试结构化解码, 否则退化为 hex
 	var respMd protoreflect.MessageDescriptor
 	if r.responseResolver != nil {
 		respMd = r.responseResolver(node.Route)
