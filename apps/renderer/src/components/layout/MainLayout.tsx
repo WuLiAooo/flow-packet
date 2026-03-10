@@ -75,7 +75,7 @@ export function MainLayout({
           { 'min-w-[280px]': showController }
         )}
       >
-        <div className="h-full overflow-auto" style={{ background: 'var(--bg-controller)' }}>
+        <div className="h-full overflow-hidden" style={{ background: 'var(--bg-controller)' }}>
           {left}
         </div>
       </ResizablePanel>

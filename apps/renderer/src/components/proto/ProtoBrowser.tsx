@@ -1,5 +1,8 @@
 import { useState, useMemo } from 'react'
-import { ChevronRight, File, Box, Trash2, Search } from 'lucide-react'
+import { ChevronRight, File, Box, Trash2, Search, Check, ChevronsUpDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Collapsible,
@@ -27,6 +30,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useProtoStore, type FileInfo, type MessageInfo } from '@/stores/protoStore'
+import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { setRouteMapping, deleteRouteMapping } from '@/services/api'
 import { combineRoute, splitRoute } from '@/types/frame'
@@ -61,24 +65,24 @@ export function ProtoBrowser() {
         </span>
       </div>
 
-      <div style={{ padding: '12px 8px 6px' }}>
+      <div className="shrink-0" style={{ padding: '12px 8px 6px' }}>
         <ProtoImport />
       </div>
 
-      <div className="shrink-0 px-2 text-xs font-medium text-muted-foreground mb-1">
+      <div className="shrink-0 px-2 text-xs font-medium text-muted-foreground mb-2">
         Proto 文件
       </div>
-      <div className="relative shrink-0" style={{ padding: '0 8px 6px' }}>
-        <Search className="absolute left-[18px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+      <div className="shrink-0 flex items-center h-7 rounded-md border border-input shadow-xs" style={{ margin: '0 8px 6px' }}>
+        <Search className="ml-2 w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索协议或消息..."
-          className="h-7 pl-7 text-xs"
+          className="h-7 pl-2 text-xs border-0 shadow-none focus-visible:ring-0"
         />
       </div>
 
-      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-h-full">
+      <ScrollArea className="flex-1 min-h-0 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-h-full">
         <SidebarGroup className="pt-0" style={{ padding: '0 8px' }}>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -145,12 +149,17 @@ function MessageNode({ message }: { message: MessageInfo }) {
   const routeFields = useConnectionStore((s) => s.routeFields)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
 
+  const updateNodes = useCanvasStore((s) => s.updateNodes)
+
   const existing = routeMappings.find((m) => m.requestMsg === message.Name)
   const hasRouteFields = routeFields.length > 0
+
+  const messages = useProtoStore((s) => s.messages)
 
   const [routeValues, setRouteValues] = useState<Record<string, number>>({})
   const [singleRoute, setSingleRoute] = useState('')
   const [responseMsg, setResponseMsg] = useState('')
+  const [responseMsgOpen, setResponseMsgOpen] = useState(false)
 
   const openDialog = () => {
     if (existing) {
@@ -177,6 +186,13 @@ function MessageNode({ message }: { message: MessageInfo }) {
 
     await setRouteMapping(route, message.Name, responseMsg, activeConnectionId)
     addRouteMapping({ route, requestMsg: message.Name, responseMsg })
+    updateNodes((nodes) =>
+      nodes.map((n) =>
+        n.type === 'requestNode' && (n.data as RequestNodeData).messageName === message.Name
+          ? { ...n, data: { ...n.data, route } }
+          : n
+      )
+    )
     setDialogOpen(false)
   }
 
@@ -249,11 +265,49 @@ function MessageNode({ message }: { message: MessageInfo }) {
 
             <div className="grid gap-2">
               <Label>响应 Message</Label>
-              <Input
-                placeholder="响应消息名称 (可选)"
-                value={responseMsg}
-                onChange={(e) => setResponseMsg(e.target.value)}
-              />
+              <Popover open={responseMsgOpen} onOpenChange={setResponseMsgOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={responseMsgOpen}
+                    className="w-full justify-between font-normal"
+                  >
+                    {responseMsg
+                      ? messages.find((m) => m.Name === responseMsg)?.ShortName ?? responseMsg
+                      : '选择响应消息 (可选)'}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                  <Command>
+                    <CommandInput placeholder="搜索消息..." />
+                    <CommandList>
+                      <CommandEmpty>没有匹配的消息</CommandEmpty>
+                      <CommandGroup>
+                        {messages.map((m) => (
+                          <CommandItem
+                            key={m.Name}
+                            value={m.ShortName}
+                            onSelect={() => {
+                              setResponseMsg(responseMsg === m.Name ? '' : m.Name)
+                              setResponseMsgOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                'mr-2 h-4 w-4',
+                                responseMsg === m.Name ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            {m.ShortName}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
