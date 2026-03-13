@@ -21,6 +21,7 @@ import { useTabStore } from '@/stores/tabStore'
 import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useProtoStore } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useCollectionStore } from '@/stores/collectionStore'
 import type { SavedConnection } from '@/stores/savedConnectionStore'
 
@@ -116,6 +117,12 @@ function App() {
     // 提取路由字段定义
     const routeFields = connection.frameConfig?.fields.filter((f) => f.isRoute) ?? []
     setRouteFields(routeFields)
+
+    // 重置执行状态和日志
+    const execStore = useExecutionStore.getState()
+    execStore.clearLogs()
+    execStore.resetNodeStatuses()
+    execStore.setStatus('idle')
 
     // 重置画布 tab 并加载该连接的集合数据
     useTabStore.getState().resetTabs()
