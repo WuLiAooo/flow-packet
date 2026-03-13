@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Loader2, Plus, Trash2, Github, ChevronRight, ChevronLeft, ChevronDown, Box, Ellipsis, Route, Hash, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -93,11 +93,28 @@ export function CreateConnectionDialog({
   ])
   const [byteOrder, setByteOrder] = useState<ByteOrder>('big')
 
+  const NAME_QUOTES = [
+    '海的那边，是自由',
+    '祝你能和重要的人，有一天能够再次相遇',
+    '碎了我们曾经的荣耀，却永远秉承着最骄傲的信仰',
+    '什么都无法舍弃的人，什么都改变不了',
+    '如果奇迹有颜色，那么一定是橙色',
+    '如果结果不如你所愿，就在尘埃落定前奋力一搏',
+    '花无凋零之时，爱无传达之日',
+    '那就永远在一起吧，一直留在你身边',
+    '我能做到吗？肯定能做到的，是你的话，一定可以',
+    '你不打算挣扎一下吗，我们不是最擅长挣扎的吗',
+    '没有未来的未来 不是我想要的未来',
+    '机甲为婚纱，银河为殿堂，爆炸为礼炮',
+    '未闻花名，但知花香，再遇花时，泪已成形'
+  ]
+  const namePlaceholder = useMemo(() => NAME_QUOTES[Math.floor(Math.random() * NAME_QUOTES.length)], [open])
+
   // form state
   const [name, setName] = useState('')
   const [tag, setTag] = useState('本地')
-  const [host, setHost] = useState('127.0.0.1')
-  const [port, setPort] = useState(9001)
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState<number | ''>('')
   const [protocol, setProtocol] = useState<'tcp' | 'ws'>('tcp')
   const [codec, setCodec] = useState<'protobuf'>('protobuf')
   const [color, setColor] = useState(COLOR_OPTIONS[0])
@@ -122,8 +139,8 @@ export function CreateConnectionDialog({
       } else {
         setName('')
         setTag('本地')
-        setHost('127.0.0.1')
-        setPort(9001)
+        setHost('')
+        setPort('')
         setProtocol('tcp')
         setCodec('protobuf')
         setColor(COLOR_OPTIONS[0])
@@ -146,13 +163,14 @@ export function CreateConnectionDialog({
   }, [step, frameType])
 
   const handleTest = async () => {
-    if (!host || !port) {
+    const portNum = Number(port)
+    if (!host || !portNum) {
       toast.error('请填写地址和端口')
       return
     }
     setTesting(true)
     try {
-      await connectTCP(host, port, {
+      await connectTCP(host, portNum, {
         protocol,
         timeout: 5000,
         reconnect: false,
@@ -192,7 +210,8 @@ export function CreateConnectionDialog({
       toast.error('请输入地址')
       return
     }
-    if (!port || port < 1 || port > 65535) {
+    const portNum = Number(port)
+    if (!portNum || portNum < 1 || portNum > 65535) {
       toast.error('请输入有效端口 (1-65535)')
       return
     }
@@ -202,7 +221,7 @@ export function CreateConnectionDialog({
         name: name.trim(),
         tag,
         host: host.trim(),
-        port,
+        port: portNum,
         protocol,
         codec,
         color,
@@ -214,7 +233,7 @@ export function CreateConnectionDialog({
         name: name.trim(),
         tag,
         host: host.trim(),
-        port,
+        port: portNum,
         protocol,
         codec,
         color,
@@ -417,14 +436,17 @@ export function CreateConnectionDialog({
               <div className="flex flex-col divide-y rounded-lg border">
                 {FRAME_TEMPLATES.map((tpl) => {
                   const selected = selectedTemplateId === tpl.id
+                  const available = tpl.id === 'due'
                   return (
                     <button
                       key={tpl.id}
                       type="button"
-                      onClick={() => setSelectedTemplateId(tpl.id)}
+                      onClick={() => available && setSelectedTemplateId(tpl.id)}
+                      disabled={!available}
                       className={cn(
                         'flex items-center gap-3 p-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg',
-                        selected ? 'bg-primary/5' : 'hover:bg-accent/50'
+                        !available && 'opacity-50 cursor-not-allowed',
+                        available && (selected ? 'bg-primary/5' : 'hover:bg-accent/50')
                       )}
                     >
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -444,9 +466,15 @@ export function CreateConnectionDialog({
                           {formatFramePreview(tpl.fields)}
                         </div>
                       </div>
-                      <Badge variant={selected ? 'default' : 'outline'} className="shrink-0">
-                        {selected ? '已选择' : '选择'}
-                      </Badge>
+                      {available ? (
+                        <Badge variant={selected ? 'default' : 'outline'} className="shrink-0">
+                          {selected ? '已选择' : '选择'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="shrink-0">
+                          敬请期待
+                        </Badge>
+                      )}
                     </button>
                   )
                 })}
@@ -693,7 +721,7 @@ export function CreateConnectionDialog({
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="连接名称"
+                      placeholder={namePlaceholder}
                       required
                     />
                   </Field>
@@ -707,9 +735,6 @@ export function CreateConnectionDialog({
                       placeholder="127.0.0.1"
                       required
                     />
-                    <FieldDescription>
-                      目标服务器的 IP 地址或域名
-                    </FieldDescription>
                   </Field>
                   <div className="flex gap-4">
                     <Field className="flex-1">
@@ -720,8 +745,8 @@ export function CreateConnectionDialog({
                         min={1}
                         max={65535}
                         value={port}
-                        onChange={(e) => setPort(parseInt(e.target.value) || 0)}
-                        placeholder="9001"
+                        onChange={(e) => setPort(e.target.value === '' ? '' : parseInt(e.target.value) || '')}
+                        placeholder="3721"
                         required
                       />
                     </Field>
@@ -749,7 +774,7 @@ export function CreateConnectionDialog({
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button id="conn-protocol" variant="outline" className="w-full justify-between font-normal">
-                          {protocol === 'tcp' ? 'TCP' : 'WebSocket 网关'}
+                          {protocol === 'tcp' ? 'TCP' : 'WebSocket'}
                           <ChevronDown className="h-4 w-4 opacity-50" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -760,9 +785,6 @@ export function CreateConnectionDialog({
                         </DropdownMenuRadioGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    <FieldDescription>
-                      选择与目标服务器通信使用的网络协议
-                    </FieldDescription>
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="conn-codec">编解码协议</FieldLabel>
@@ -779,9 +801,6 @@ export function CreateConnectionDialog({
                         </DropdownMenuRadioGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    <FieldDescription>
-                      选择消息体的编解码方式
-                    </FieldDescription>
                   </Field>
                   <Field>
                     <FieldLabel>标识颜色</FieldLabel>
@@ -801,9 +820,6 @@ export function CreateConnectionDialog({
                         />
                       ))}
                     </div>
-                    <FieldDescription>
-                      用于在连接列表中快速区分不同服务器
-                    </FieldDescription>
                   </Field>
                   <FieldGroup>
                     <Field>
