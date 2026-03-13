@@ -32,6 +32,8 @@ interface CollectionStore {
   createFolder: (name: string, parentId: string) => Promise<CollectionFolder>
   renameFolder: (id: string, name: string) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
+  moveFolder: (id: string, parentId: string) => Promise<void>
+  moveCollection: (id: string, folderId: string) => Promise<void>
 }
 
 export const useCollectionStore = create<CollectionStore>((set) => ({
@@ -89,6 +91,24 @@ export const useCollectionStore = create<CollectionStore>((set) => ({
     set((s) => ({
       folders: s.folders.map((f) =>
         f.id === id ? { ...f, name } : f
+      ),
+    }))
+  },
+
+  moveFolder: async (id, parentId) => {
+    await api.moveCollectionFolder(id, parentId)
+    set((s) => ({
+      folders: s.folders.map((f) =>
+        f.id === id ? { ...f, parentId } : f
+      ),
+    }))
+  },
+
+  moveCollection: async (id, folderId) => {
+    await api.moveCollection(id, folderId)
+    set((s) => ({
+      collections: s.collections.map((c) =>
+        c.id === id ? { ...c, folderId } : c
       ),
     }))
   },

@@ -122,6 +122,14 @@ export async function deleteCollectionFolder(id: string) {
   return sendRequest('collection.folder.delete', { id })
 }
 
+export async function moveCollectionFolder(id: string, parentId: string) {
+  return sendRequest('collection.folder.move', { id, parentId })
+}
+
+export async function moveCollection(id: string, folderId: string) {
+  return sendRequest('collection.move', { id, folderId })
+}
+
 // 流程执行
 export async function executeFlow(nodes: unknown[], edges: unknown[], connectionId: string) {
   return sendRequest('flow.execute', { nodes, edges, connectionId })

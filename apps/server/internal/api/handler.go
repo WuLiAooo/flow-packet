@@ -140,6 +140,8 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("collection.folder.create", makeCollectionFolderCreateHandler(state))
 	srv.Handle("collection.folder.rename", makeCollectionFolderRenameHandler(state))
 	srv.Handle("collection.folder.delete", makeCollectionFolderDeleteHandler(state))
+	srv.Handle("collection.folder.move", makeCollectionFolderMoveHandler(state))
+	srv.Handle("collection.move", makeCollectionMoveHandler(state))
 }
 
 // makeProtoUploadHandler 创建 Proto 文件上传处理函数
@@ -796,6 +798,101 @@ func makeCollectionFolderDeleteHandler(state *AppState) HandlerFunc {
 		}
 		col.Folders = filteredFolders
 		col.Items = filteredItems
+
+		if err := writeCollections(state.CollectionFile, col); err != nil {
+			return nil, fmt.Errorf("failed to save collections: %w", err)
+		}
+		return map[string]string{"status": "ok"}, nil
+	}
+}
+
+// makeCollectionFolderMoveHandler 创建 collection.folder.move 处理函数, 移动文件夹到新的父文件夹
+func makeCollectionFolderMoveHandler(state *AppState) HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		var req struct {
+			ID       string `json:"id"`
+			ParentID string `json:"parentId"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+		if req.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
+
+		col, err := readCollections(state.CollectionFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read collections: %w", err)
+		}
+
+		// 不能将文件夹移动到自身或其子文件夹下
+		if req.ID == req.ParentID {
+			return nil, fmt.Errorf("cannot move folder into itself")
+		}
+		descendantIDs := map[string]bool{req.ID: true}
+		changed := true
+		for changed {
+			changed = false
+			for _, f := range col.Folders {
+				if descendantIDs[f.ParentID] && !descendantIDs[f.ID] {
+					descendantIDs[f.ID] = true
+					changed = true
+				}
+			}
+		}
+		if descendantIDs[req.ParentID] {
+			return nil, fmt.Errorf("cannot move folder into its descendant")
+		}
+
+		found := false
+		for i, f := range col.Folders {
+			if f.ID == req.ID {
+				col.Folders[i].ParentID = req.ParentID
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("folder not found: %s", req.ID)
+		}
+
+		if err := writeCollections(state.CollectionFile, col); err != nil {
+			return nil, fmt.Errorf("failed to save collections: %w", err)
+		}
+		return map[string]string{"status": "ok"}, nil
+	}
+}
+
+// makeCollectionMoveHandler 创建 collection.move 处理函数, 移动集合到新的文件夹
+func makeCollectionMoveHandler(state *AppState) HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		var req struct {
+			ID       string `json:"id"`
+			FolderID string `json:"folderId"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+		if req.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
+
+		col, err := readCollections(state.CollectionFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read collections: %w", err)
+		}
+
+		found := false
+		for i, item := range col.Items {
+			if item.ID == req.ID {
+				col.Items[i].FolderID = req.FolderID
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("collection not found: %s", req.ID)
+		}
 
 		if err := writeCollections(state.CollectionFile, col); err != nil {
 			return nil, fmt.Errorf("failed to save collections: %w", err)
