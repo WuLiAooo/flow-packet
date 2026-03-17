@@ -32,6 +32,7 @@ import { Badge } from '@/components/ui/badge'
 import { useProtoStore, type FileInfo, type MessageInfo } from '@/stores/protoStore'
 import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { setRouteMapping, deleteRouteMapping } from '@/services/api'
 import { combineRoute, splitRoute } from '@/types/frame'
 import { ProtoImport } from './ProtoImport'
@@ -148,8 +149,13 @@ function MessageNode({ message }: { message: MessageInfo }) {
   const removeRouteMapping = useProtoStore((s) => s.removeRouteMapping)
   const routeFields = useConnectionStore((s) => s.routeFields)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const getConnection = useSavedConnectionStore((s) => s.getConnection)
 
   const updateNodes = useCanvasStore((s) => s.updateNodes)
+
+  const isPomelo = activeConnectionId
+    ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
+    : false
 
   const existing = routeMappings.find((m) => m.requestMsg === message.Name)
   const hasRouteFields = routeFields.length > 0
@@ -163,7 +169,9 @@ function MessageNode({ message }: { message: MessageInfo }) {
 
   const openDialog = () => {
     if (existing) {
-      if (hasRouteFields) {
+      if (isPomelo) {
+        setSingleRoute(existing.stringRoute ?? '')
+      } else if (hasRouteFields) {
         setRouteValues(splitRoute(existing.route, routeFields))
       } else {
         setSingleRoute(String(existing.route))
@@ -179,27 +187,41 @@ function MessageNode({ message }: { message: MessageInfo }) {
 
   const handleSave = async () => {
     if (!activeConnectionId) return
-    const route = hasRouteFields
-      ? combineRoute(routeValues, routeFields)
-      : (Number(singleRoute) || 0)
-    if (!route) return
 
-    await setRouteMapping(route, message.Name, responseMsg, activeConnectionId)
-    addRouteMapping({ route, requestMsg: message.Name, responseMsg })
-    updateNodes((nodes) =>
-      nodes.map((n) =>
-        n.type === 'requestNode' && (n.data as RequestNodeData).messageName === message.Name
-          ? { ...n, data: { ...n.data, route } }
-          : n
+    if (isPomelo) {
+      const stringRoute = singleRoute.trim()
+      if (!stringRoute) return
+      await setRouteMapping(0, message.Name, responseMsg, activeConnectionId, stringRoute)
+      addRouteMapping({ route: 0, stringRoute, requestMsg: message.Name, responseMsg })
+      updateNodes((nodes) =>
+        nodes.map((n) =>
+          n.type === 'requestNode' && (n.data as RequestNodeData).messageName === message.Name
+            ? { ...n, data: { ...n.data, route: 0, stringRoute } }
+            : n
+        )
       )
-    )
+    } else {
+      const route = hasRouteFields
+        ? combineRoute(routeValues, routeFields)
+        : (Number(singleRoute) || 0)
+      if (!route) return
+      await setRouteMapping(route, message.Name, responseMsg, activeConnectionId)
+      addRouteMapping({ route, requestMsg: message.Name, responseMsg })
+      updateNodes((nodes) =>
+        nodes.map((n) =>
+          n.type === 'requestNode' && (n.data as RequestNodeData).messageName === message.Name
+            ? { ...n, data: { ...n.data, route } }
+            : n
+        )
+      )
+    }
     setDialogOpen(false)
   }
 
   const handleDelete = async () => {
     if (!activeConnectionId || !existing) return
-    await deleteRouteMapping(existing.route, activeConnectionId)
-    removeRouteMapping(existing.route)
+    await deleteRouteMapping(existing.route, activeConnectionId, existing.stringRoute)
+    removeRouteMapping(existing.route, existing.stringRoute)
     setDialogOpen(false)
   }
 
@@ -220,7 +242,7 @@ function MessageNode({ message }: { message: MessageInfo }) {
         <span className="truncate">{message.ShortName}</span>
         {existing && (
           <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground">
-            {existing.route}
+            {existing.stringRoute || existing.route}
           </Badge>
         )}
       </SidebarMenuButton>
@@ -233,7 +255,16 @@ function MessageNode({ message }: { message: MessageInfo }) {
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
-            {hasRouteFields ? (
+            {isPomelo ? (
+              <div className="grid gap-2">
+                <Label>路由</Label>
+                <Input
+                  placeholder="game.handler.login"
+                  value={singleRoute}
+                  onChange={(e) => setSingleRoute(e.target.value)}
+                />
+              </div>
+            ) : hasRouteFields ? (
               <div className="grid gap-2">
                 <Label>路由</Label>
                 <div className="flex items-center gap-2">

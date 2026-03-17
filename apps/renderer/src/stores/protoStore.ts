@@ -41,6 +41,7 @@ export interface FileInfo {
 
 export interface RouteMapping {
   route: number
+  stringRoute?: string
   requestMsg: string
   responseMsg: string
 }
@@ -54,7 +55,7 @@ interface ProtoStore {
   setMessages: (messages: MessageInfo[]) => void
   setRouteMappings: (mappings: RouteMapping[]) => void
   addRouteMapping: (mapping: RouteMapping) => void
-  removeRouteMapping: (route: number) => void
+  removeRouteMapping: (route: number, stringRoute?: string) => void
   getMessageByName: (name: string) => MessageInfo | undefined
 }
 
@@ -67,15 +68,21 @@ export const useProtoStore = create<ProtoStore>((set, get) => ({
   setMessages: (messages) => set({ messages }),
   setRouteMappings: (mappings) => set({ routeMappings: mappings }),
   addRouteMapping: (mapping) =>
-    set((s) => ({
-      routeMappings: [
-        ...s.routeMappings.filter((r) => r.route !== mapping.route),
-        mapping,
-      ],
-    })),
-  removeRouteMapping: (route) =>
-    set((s) => ({
-      routeMappings: s.routeMappings.filter((r) => r.route !== route),
-    })),
+    set((s) => {
+      const key = mapping.stringRoute || String(mapping.route)
+      return {
+        routeMappings: [
+          ...s.routeMappings.filter((r) => (r.stringRoute || String(r.route)) !== key),
+          mapping,
+        ],
+      }
+    }),
+  removeRouteMapping: (route, stringRoute) =>
+    set((s) => {
+      const key = stringRoute || String(route)
+      return {
+        routeMappings: s.routeMappings.filter((r) => (r.stringRoute || String(r.route)) !== key),
+      }
+    }),
   getMessageByName: (name) => get().messages.find((m) => m.Name === name),
 }))

@@ -59,7 +59,7 @@ interface CreateConnectionDialogProps {
 function StepIndicator({ step }: { step: number }) {
   return (
     <div className="flex items-center gap-1.5 mb-4">
-      {[1, 2, 3].map((s) => (
+      {[1, 2, 3, 4].map((s) => (
         <div
           key={s}
           className={cn(
@@ -85,13 +85,14 @@ export function CreateConnectionDialog({
   const updateConnection = useSavedConnectionStore((s) => s.updateConnection)
 
   // wizard state
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [frameType, setFrameType] = useState<'template' | 'saved' | 'custom'>('template')
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [customFields, setCustomFields] = useState<FrameField[]>([
     { name: '', bytes: 4 },
   ])
   const [byteOrder, setByteOrder] = useState<ByteOrder>('big')
+  const [cherryParser, setCherryParser] = useState<'simple' | 'pomelo'>('simple')
 
   const NAME_QUOTES = [
     '海的那边，是自由',
@@ -135,7 +136,7 @@ export function CreateConnectionDialog({
         setProtocol(editConnection.protocol ?? 'tcp')
         setCodec(editConnection.codec ?? 'protobuf')
         setColor(editConnection.color)
-        setStep(3)
+        setStep(4)
       } else {
         setName('')
         setTag('本地')
@@ -149,6 +150,7 @@ export function CreateConnectionDialog({
         setSelectedTemplateId(null)
         setCustomFields([{ name: '', bytes: 4 }])
         setByteOrder('big')
+        setCherryParser('simple')
       }
       setTesting(false)
       setShowSaveTemplate(false)
@@ -192,6 +194,12 @@ export function CreateConnectionDialog({
   const buildFrameConfig = (): FrameConfig => {
     if (frameType === 'template') {
       const tpl = FRAME_TEMPLATES.find((t) => t.id === selectedTemplateId)!
+      if (tpl.id === 'cherry') {
+        const fields = cherryParser === 'simple'
+          ? [{ name: 'mid', bytes: 4, isRoute: true }, { name: 'len', bytes: 4 }]
+          : [{ name: 'type', bytes: 1 }, { name: 'length', bytes: 3 }]
+        return { type: 'template', templateId: tpl.id, fields, byteOrder: 'big', parserMode: cherryParser }
+      }
       return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: 'big' }
     }
     if (frameType === 'saved') {
@@ -274,7 +282,7 @@ export function CreateConnectionDialog({
       <DialogContent
         className={cn(
           'p-0 border-0 bg-transparent shadow-none gap-0',
-          step === 3 || showSaveTemplate ? 'sm:max-w-md' : 'sm:max-w-lg'
+          step >= 3 || showSaveTemplate ? 'sm:max-w-md' : 'sm:max-w-lg'
         )}
         showCloseButton={false}
       >
@@ -701,11 +709,137 @@ export function CreateConnectionDialog({
           </Card>
         )}
 
-        {/* Step 3: Connection form */}
+        {/* Step 3: Protocol configuration */}
         {!showSaveTemplate && step === 3 && (
           <Card>
             <CardHeader>
-              {!isEdit && <StepIndicator step={3} />}
+              <StepIndicator step={3} />
+              <CardTitle>协议配置</CardTitle>
+              <CardDescription>
+                配置网络传输协议和数据编解码方式
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-4">
+                <Field>
+                  <FieldLabel>网络协议</FieldLabel>
+                  <div className="flex items-center gap-1 rounded-lg border p-1">
+                    <button
+                      type="button"
+                      onClick={() => setProtocol('tcp')}
+                      className={cn(
+                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                        protocol === 'tcp'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      TCP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProtocol('ws')}
+                      className={cn(
+                        'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                        protocol === 'ws'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      WebSocket
+                    </button>
+                  </div>
+                </Field>
+                <Field>
+                  <FieldLabel>编解码协议</FieldLabel>
+                  <div className="flex items-center gap-1 rounded-lg border p-1">
+                    <button
+                      type="button"
+                      className="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors bg-primary text-primary-foreground"
+                    >
+                      Protobuf
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      className="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors text-muted-foreground/50 cursor-not-allowed"
+                    >
+                      JSON
+                    </button>
+                  </div>
+                  <FieldDescription>JSON 编解码即将支持</FieldDescription>
+                </Field>
+                {selectedTemplateId === 'cherry' && (
+                  <Field>
+                    <FieldLabel>解析器模式</FieldLabel>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCherryParser('simple')}
+                        className={cn(
+                          'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+                          cherryParser === 'simple'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:bg-accent/50'
+                        )}
+                      >
+                        <div className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-current">
+                          {cherryParser === 'simple' && (
+                            <div className="h-2 w-2 rounded-full bg-current" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">Simple</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            简单二进制协议 — MID(4B) + DataLen(4B) + Data
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCherryParser('pomelo')}
+                        className={cn(
+                          'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+                          cherryParser === 'pomelo'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:bg-accent/50'
+                        )}
+                      >
+                        <div className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-current">
+                          {cherryParser === 'pomelo' && (
+                            <div className="h-2 w-2 rounded-full bg-current" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">Pomelo</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            兼容 Pomelo 协议，支持路由压缩和数据压缩
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </Field>
+                )}
+              </div>
+            </CardContent>
+            <CardFooter className="justify-between">
+              <Button variant="ghost" onClick={() => setStep(2)}>
+                <ChevronLeft className="w-4 h-4" />
+                上一步
+              </Button>
+              <Button onClick={() => setStep(4)}>
+                下一步
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {/* Step 4: Connection form */}
+        {!showSaveTemplate && step === 4 && (
+          <Card>
+            <CardHeader>
+              {!isEdit && <StepIndicator step={4} />}
               <CardTitle>{isEdit ? '编辑连接' : '新建连接'}</CardTitle>
               <CardDescription>
                 配置目标服务器的连接信息，保存后可在首页快速访问
@@ -769,39 +903,6 @@ export function CreateConnectionDialog({
                       </DropdownMenu>
                     </Field>
                   </div>
-                  <Field>
-                    <FieldLabel htmlFor="conn-protocol">网络协议</FieldLabel>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button id="conn-protocol" variant="outline" className="w-full justify-between font-normal">
-                          {protocol === 'tcp' ? 'TCP' : 'WebSocket'}
-                          <ChevronDown className="h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="min-w-[var(--radix-dropdown-menu-trigger-width)]">
-                        <DropdownMenuRadioGroup value={protocol} onValueChange={(v) => setProtocol(v as 'tcp' | 'ws')}>
-                          <DropdownMenuRadioItem value="tcp">TCP</DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="ws">WebSocket</DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="conn-codec">编解码协议</FieldLabel>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button id="conn-codec" variant="outline" className="w-full justify-between font-normal">
-                          Protobuf
-                          <ChevronDown className="h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="min-w-[var(--radix-dropdown-menu-trigger-width)]">
-                        <DropdownMenuRadioGroup value={codec} onValueChange={(v) => setCodec(v as 'protobuf')}>
-                          <DropdownMenuRadioItem value="protobuf">Protobuf</DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </Field>
                   <Field>
                     <FieldLabel>标识颜色</FieldLabel>
                     <div className="flex items-center gap-2">

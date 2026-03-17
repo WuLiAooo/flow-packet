@@ -64,11 +64,17 @@ type PacketConfig struct {
 	RouteBytes  int                // route 字段字节数
 	SeqBytes    int                // seq 字段字节数
 	FieldDriven *FieldDrivenConfig // 非 nil 时启用字段驱动模式
+	Pomelo      *PomeloConfig      // 非 nil 时启用 Pomelo 模式
 }
 
 // IsFieldDriven 返回是否使用字段驱动模式
 func (c PacketConfig) IsFieldDriven() bool {
 	return c.FieldDriven != nil
+}
+
+// IsPomelo 返回是否使用 Pomelo 模式
+func (c PacketConfig) IsPomelo() bool {
+	return c.Pomelo != nil
 }
 
 // DefaultPacketConfig 默认帧配置
@@ -84,11 +90,12 @@ const headerSize = 5
 
 // Packet 解析后的数据包
 type Packet struct {
-	Heartbeat bool   // 是否为心跳包(header 中 h=1)
-	ExtCode   uint8  // 扩展操作码 (7 bits)
-	Route     uint32 // 消息路由(仅数据包)
-	Seq       uint32 // 消息序列号(仅数据包)
-	Data      []byte // 消息体(数据包)或心跳时间(心跳包)
+	Heartbeat   bool   // 是否为心跳包(header 中 h=1)
+	ExtCode     uint8  // 扩展操作码 (7 bits)
+	Route       uint32 // 消息路由(仅数据包)
+	Seq         uint32 // 消息序列号(仅数据包)
+	Data        []byte // 消息体(数据包)或心跳时间(心跳包)
+	StringRoute string // Pomelo 字符串路由(非空时优先使用)
 }
 
 // IsHeartbeat 返回是否为心跳包
@@ -100,6 +107,9 @@ func (p *Packet) IsHeartbeat() bool {
 // 字段驱动模式: 按 FieldDrivenConfig 定义小端编码
 // Legacy Due 模式: size(4B) + header(1B: h=0 + extcode) + route + seq + message data
 func Encode(pkt *Packet, cfg PacketConfig) ([]byte, error) {
+	if cfg.IsPomelo() {
+		return pomeloEncode(pkt, cfg.Pomelo)
+	}
 	if cfg.IsFieldDriven() {
 		return fieldDrivenEncode(pkt, cfg.FieldDriven)
 	}
@@ -199,6 +209,9 @@ func readUintN(buf []byte, n int) uint32 {
 
 // DecodeBytes 从完整的字节数组中解码一个数据包
 func DecodeBytes(data []byte, cfg PacketConfig) (*Packet, error) {
+	if cfg.IsPomelo() {
+		return pomeloDecodeBytes(data, cfg.Pomelo)
+	}
 	if cfg.IsFieldDriven() {
 		return fieldDrivenDecodeBytes(data, cfg.FieldDriven)
 	}
@@ -261,7 +274,29 @@ func NewDecoder(reader io.Reader, cfg PacketConfig) *Decoder {
 }
 
 // Decode 从流中读取并解码下一个完整的数据包
+// DecodeRaw 从流中读取下一个完整帧, 返回原始字节(含帧头)
+//
+// 仅 Pomelo 模式使用, 避免 decode-reencode 导致控制包信息丢失
+func (d *Decoder) DecodeRaw() ([]byte, error) {
+	if d.cfg.IsPomelo() {
+		return pomeloDecodeRaw(d.reader)
+	}
+	// 非 Pomelo 模式: 解码后重新编码
+	pkt, err := d.Decode()
+	if err != nil {
+		return nil, err
+	}
+	return Encode(pkt, d.cfg)
+}
+
 func (d *Decoder) Decode() (*Packet, error) {
+	if d.cfg.IsPomelo() {
+		raw, err := pomeloDecodeRaw(d.reader)
+		if err != nil {
+			return nil, err
+		}
+		return pomeloDecodeBytes(raw, d.cfg.Pomelo)
+	}
 	if d.cfg.IsFieldDriven() {
 		return d.decodeFieldDriven()
 	}

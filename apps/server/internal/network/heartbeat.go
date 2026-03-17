@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -99,6 +100,7 @@ func (h *Heartbeat) Feed() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lastReceived = time.Now()
+	fmt.Println("[heartbeat] feed, received heartbeat response")
 }
 
 // Running 返回心跳是否正在运行
@@ -126,6 +128,7 @@ func (h *Heartbeat) loop() {
 			h.mu.Unlock()
 
 			if elapsed > h.cfg.Timeout {
+				fmt.Printf("[heartbeat] timeout, last received %v ago\n", elapsed)
 				if h.onTimeout != nil {
 					h.onTimeout()
 				}
@@ -150,8 +153,13 @@ func (h *Heartbeat) sendHeartbeat() {
 
 	data, err := codec.Encode(pkt, h.packetCfg)
 	if err != nil {
+		fmt.Printf("[heartbeat] encode error: %v\n", err)
 		return
 	}
 
-	h.sendFn(data)
+	if err := h.sendFn(data); err != nil {
+		fmt.Printf("[heartbeat] send error: %v\n", err)
+		return
+	}
+	fmt.Printf("[heartbeat] sent %d bytes\n", len(data))
 }

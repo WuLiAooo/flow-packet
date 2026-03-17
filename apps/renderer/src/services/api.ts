@@ -13,6 +13,7 @@ export async function connectTCP(host: string, port: number, options?: {
   heartbeat?: boolean
   frameFields?: { name: string; bytes: number; isRoute?: boolean; isSeq?: boolean }[]
   byteOrder?: 'big' | 'little'
+  parserMode?: 'simple' | 'pomelo'
 }) {
   return sendRequest('conn.connect', { host, port, ...options })
 }
@@ -62,12 +63,12 @@ export async function getRouteList(connectionId: string) {
   return sendRequest('route.list', { connectionId })
 }
 
-export async function setRouteMapping(route: number, requestMsg: string, responseMsg: string, connectionId: string) {
-  return sendRequest('route.set', { route, requestMsg, responseMsg, connectionId })
+export async function setRouteMapping(route: number, requestMsg: string, responseMsg: string, connectionId: string, stringRoute?: string) {
+  return sendRequest('route.set', { route, stringRoute, requestMsg, responseMsg, connectionId })
 }
 
-export async function deleteRouteMapping(route: number, connectionId: string) {
-  return sendRequest('route.delete', { route, connectionId })
+export async function deleteRouteMapping(route: number, connectionId: string, stringRoute?: string) {
+  return sendRequest('route.delete', { route, stringRoute, connectionId })
 }
 
 // 模板管理

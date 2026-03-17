@@ -21,7 +21,7 @@ type ConnState struct {
 	CollectionFile string
 	RouteFile      string
 	ParseResult    *parser.ParseResult
-	RouteMappings  map[uint32]RouteMapping
+	RouteMappings  map[string]RouteMapping
 }
 
 // AppState 应用状态, 在各 handler 间共享
@@ -71,13 +71,13 @@ func (s *AppState) GetConnState(connID string) *ConnState {
 		ProtoDir:       protoDir,
 		CollectionFile: filepath.Join(connDir, "collections.json"),
 		RouteFile:      routeFile,
-		RouteMappings:  make(map[uint32]RouteMapping),
+		RouteMappings:  make(map[string]RouteMapping),
 	}
 
 	// 加载已有路由映射
 	if routes, err := readRouteMappings(routeFile); err == nil {
 		for _, rm := range routes {
-			cs.RouteMappings[rm.Route] = rm
+			cs.RouteMappings[rm.Key()] = rm
 		}
 	}
 
@@ -109,8 +109,17 @@ type FrameTemplate struct {
 // RouteMapping route 值到 message 名称的映射
 type RouteMapping struct {
 	Route       uint32 `json:"route"`
+	StringRoute string `json:"stringRoute,omitempty"`
 	RequestMsg  string `json:"requestMsg"`
 	ResponseMsg string `json:"responseMsg"`
+}
+
+// Key 返回路由映射的唯一标识, 字符串路由优先
+func (rm RouteMapping) Key() string {
+	if rm.StringRoute != "" {
+		return rm.StringRoute
+	}
+	return fmt.Sprintf("%d", rm.Route)
 }
 
 // NewAppState 创建应用状态
@@ -321,8 +330,8 @@ func makeRouteSetHandler(state *AppState) HandlerFunc {
 		if err := json.Unmarshal(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid payload: %w", err)
 		}
-		if req.Route == 0 {
-			return nil, fmt.Errorf("route cannot be 0")
+		if req.Route == 0 && req.StringRoute == "" {
+			return nil, fmt.Errorf("route cannot be empty")
 		}
 		if req.ConnectionID == "" {
 			return nil, fmt.Errorf("connectionId is required")
@@ -333,7 +342,7 @@ func makeRouteSetHandler(state *AppState) HandlerFunc {
 			return nil, fmt.Errorf("invalid connectionId")
 		}
 
-		cs.RouteMappings[req.Route] = req.RouteMapping
+		cs.RouteMappings[req.RouteMapping.Key()] = req.RouteMapping
 		if err := writeRouteMappings(cs.RouteFile, cs.RouteMappings); err != nil {
 			return nil, fmt.Errorf("failed to save routes: %w", err)
 		}
@@ -347,6 +356,7 @@ func makeRouteDeleteHandler(state *AppState) HandlerFunc {
 		var req struct {
 			ConnectionID string `json:"connectionId"`
 			Route        uint32 `json:"route"`
+			StringRoute  string `json:"stringRoute"`
 		}
 		if err := json.Unmarshal(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid payload: %w", err)
@@ -360,7 +370,11 @@ func makeRouteDeleteHandler(state *AppState) HandlerFunc {
 			return nil, fmt.Errorf("invalid connectionId")
 		}
 
-		delete(cs.RouteMappings, req.Route)
+		key := req.StringRoute
+		if key == "" {
+			key = fmt.Sprintf("%d", req.Route)
+		}
+		delete(cs.RouteMappings, key)
 		if err := writeRouteMappings(cs.RouteFile, cs.RouteMappings); err != nil {
 			return nil, fmt.Errorf("failed to save routes: %w", err)
 		}
@@ -385,7 +399,7 @@ func readRouteMappings(path string) ([]RouteMapping, error) {
 }
 
 // writeRouteMappings 将路由映射写入文件
-func writeRouteMappings(path string, mappings map[uint32]RouteMapping) error {
+func writeRouteMappings(path string, mappings map[string]RouteMapping) error {
 	routes := make([]RouteMapping, 0, len(mappings))
 	for _, rm := range mappings {
 		routes = append(routes, rm)

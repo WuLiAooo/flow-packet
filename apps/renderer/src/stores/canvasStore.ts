@@ -4,6 +4,7 @@ import type { Node, Edge } from '@xyflow/react'
 export interface RequestNodeData {
   messageName: string
   route: number
+  stringRoute?: string
   fields: Record<string, unknown>
   responseFields?: { name: string; type: string }[]
   [key: string]: unknown

@@ -14,6 +14,7 @@ export interface FrameConfig {
   templateId?: string
   fields: FrameField[]
   byteOrder: ByteOrder
+  parserMode?: 'simple' | 'pomelo'
 }
 
 export interface FrameTemplate {

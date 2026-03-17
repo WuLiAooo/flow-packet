@@ -16,6 +16,7 @@ type FlowNode struct {
 	ID          string         `json:"id"`
 	MessageName string         `json:"messageName"`
 	Route       uint32         `json:"route"`
+	StringRoute string         `json:"stringRoute"`
 	Fields      map[string]any `json:"fields"`
 }
 
@@ -46,17 +47,21 @@ type MessageResolver func(messageName string) protoreflect.MessageDescriptor
 // ResponseResolver 根据 route 获取响应消息描述符
 type ResponseResolver func(route uint32) protoreflect.MessageDescriptor
 
+// StringRouteResponseResolver 根据字符串路由获取响应消息描述符
+type StringRouteResponseResolver func(route string) protoreflect.MessageDescriptor
+
 // Runner 串行流程执行器
 type Runner struct {
-	mu               sync.Mutex
-	running          bool
-	cancel           context.CancelFunc
-	seqCtx           *SeqContext
-	packetCfg        codec.PacketConfig
-	timeout          time.Duration
-	sendFn           func(data []byte) error
-	resolver         MessageResolver
-	responseResolver ResponseResolver
+	mu                     sync.Mutex
+	running                bool
+	cancel                 context.CancelFunc
+	seqCtx                 *SeqContext
+	packetCfg              codec.PacketConfig
+	timeout                time.Duration
+	sendFn                 func(data []byte) error
+	resolver               MessageResolver
+	responseResolver       ResponseResolver
+	stringResponseResolver StringRouteResponseResolver
 }
 
 // NewRunner 创建执行器
@@ -86,6 +91,11 @@ func (r *Runner) SetResolver(resolver MessageResolver) {
 // SetResponseResolver 设置响应消息解析器
 func (r *Runner) SetResponseResolver(resolver ResponseResolver) {
 	r.responseResolver = resolver
+}
+
+// SetStringRouteResponseResolver 设置字符串路由响应消息解析器
+func (r *Runner) SetStringRouteResponseResolver(resolver StringRouteResponseResolver) {
+	r.stringResponseResolver = resolver
 }
 
 // SetTimeout 设置响应超时
@@ -263,9 +273,10 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 
 	// 封装协议帧
 	pkt := &codec.Packet{
-		Route: node.Route,
-		Seq:   seq,
-		Data:  protoData,
+		Route:       node.Route,
+		Seq:         seq,
+		Data:        protoData,
+		StringRoute: node.StringRoute,
 	}
 
 	frame, err := codec.Encode(pkt, r.packetCfg)
@@ -298,7 +309,9 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 
 	// 解码响应: 有 responseResolver 时尝试结构化解码, 否则退化为 hex
 	var respMd protoreflect.MessageDescriptor
-	if r.responseResolver != nil {
+	if node.StringRoute != "" && r.stringResponseResolver != nil {
+		respMd = r.stringResponseResolver(node.StringRoute)
+	} else if r.responseResolver != nil {
 		respMd = r.responseResolver(node.Route)
 	}
 	if respMd != nil {

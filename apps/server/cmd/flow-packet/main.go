@@ -59,8 +59,11 @@ func main() {
 		activeClient.Disconnect()
 	})
 
+	// Pomelo 握手响应通道
+	pomeloHandshakeCh := make(chan []byte, 1)
+
 	// 注册连接管理 handlers
-	registerConnHandlers(srv, tcpClient, wsClient, &activeClient, &packetCfg, runner, hb)
+	registerConnHandlers(srv, tcpClient, wsClient, &activeClient, &packetCfg, runner, hb, pomeloHandshakeCh)
 
 	// 注册流程执行 handlers
 	registerFlowHandlers(srv, runner, appState)
@@ -75,6 +78,19 @@ func main() {
 		}
 		if pkt.IsHeartbeat() {
 			hb.Feed()
+			return
+		}
+		// Pomelo 控制包处理
+		if packetCfg.IsPomelo() && pkt.ExtCode != 0 {
+			switch pkt.ExtCode {
+			case codec.PomeloPacketHandshake:
+				select {
+				case pomeloHandshakeCh <- pkt.Data:
+				default:
+				}
+			case codec.PomeloPacketKick:
+				activeClient.Disconnect()
+			}
 			return
 		}
 		// 先精确匹配 seq; 若服务端不回传 seq(seq=0), 回退到匹配最早的等待请求
@@ -107,12 +123,18 @@ func main() {
 	wsClient.OnConnect(onConnect)
 	wsClient.OnDisconnect(onDisconnect)
 
-	// 启动 HTTP/WS 服务(固定端口, 与前端 fallback 一致)
-	_, err = srv.Start(58996)
+	// 启动 HTTP/WS 服务, 优先使用固定端口, 失败时回退到动态端口
+	actualPort, err := srv.Start(58996)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start server: %v\n", err)
-		os.Exit(1)
+		// 固定端口被占用, 回退到动态端口
+		actualPort, err = srv.Start(0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to start server: %v\n", err)
+			os.Exit(1)
+		}
 	}
+	// 输出端口号供 Electron 主进程捕获
+	fmt.Printf("PORT:%d\n", actualPort)
 
 	// 等待退出信号
 	sigCh := make(chan os.Signal, 1)
@@ -125,7 +147,15 @@ func main() {
 	srv.Stop()
 }
 
-func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClient *network.WSClient, activeClient *network.Client, packetCfg *codec.PacketConfig, runner *engine.Runner, hb *network.Heartbeat) {
+func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClient *network.WSClient, activeClient *network.Client, packetCfg *codec.PacketConfig, runner *engine.Runner, hb *network.Heartbeat, pomeloHandshakeCh chan []byte) {
+	// applyConfig 将新的 PacketConfig 同步到所有组件
+	applyConfig := func(newCfg codec.PacketConfig) {
+		*packetCfg = newCfg
+		tcpClient.SetPacketConfig(newCfg)
+		wsClient.SetPacketConfig(newCfg)
+		runner.SetPacketConfig(newCfg)
+	}
+
 	srv.Handle("conn.connect", func(payload json.RawMessage) (any, error) {
 		var req struct {
 			Host        string `json:"host"`
@@ -135,6 +165,7 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 			Reconnect   bool   `json:"reconnect"`
 			Heartbeat   bool   `json:"heartbeat"`
 			ByteOrder   string `json:"byteOrder"`
+			ParserMode  string `json:"parserMode"`
 			FrameFields []struct {
 				Name    string `json:"name"`
 				Bytes   int    `json:"bytes"`
@@ -146,8 +177,26 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 			return nil, fmt.Errorf("invalid payload: %w", err)
 		}
 
-		// 根据 frameFields 动态计算 PacketConfig
-		if len(req.FrameFields) > 0 {
+		// 先停止心跳并断开当前活跃连接
+		hb.Stop()
+		(*activeClient).Disconnect()
+
+		// 清空握手通道
+		select {
+		case <-pomeloHandshakeCh:
+		default:
+		}
+
+		// Pomelo 模式
+		if req.ParserMode == "pomelo" {
+			newCfg := codec.PacketConfig{
+				Pomelo: &codec.PomeloConfig{
+					UseRouteCompress: true,
+				},
+			}
+			applyConfig(newCfg)
+		} else if len(req.FrameFields) > 0 {
+			// 根据 frameFields 动态计算 PacketConfig
 			// Due 检测: 存在 name=="header" && bytes==1 -> legacy 模式
 			isDue := false
 			for _, f := range req.FrameFields {
@@ -168,14 +217,10 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 						seqBytes = f.Bytes
 					}
 				}
-				newCfg := codec.PacketConfig{
+				applyConfig(codec.PacketConfig{
 					RouteBytes: routeBytes,
 					SeqBytes:   seqBytes,
-				}
-				*packetCfg = newCfg
-				tcpClient.SetPacketConfig(newCfg)
-				wsClient.SetPacketConfig(newCfg)
-				runner.SetPacketConfig(newCfg)
+				})
 			} else {
 				// 字段驱动模式
 				fields := make([]codec.FieldDef, len(req.FrameFields))
@@ -192,13 +237,9 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 					return nil, fmt.Errorf("invalid frame fields: %w", err)
 				}
 				fdCfg.BigEndian = req.ByteOrder == "big"
-				newCfg := codec.PacketConfig{
+				applyConfig(codec.PacketConfig{
 					FieldDriven: fdCfg,
-				}
-				*packetCfg = newCfg
-				tcpClient.SetPacketConfig(newCfg)
-				wsClient.SetPacketConfig(newCfg)
-				runner.SetPacketConfig(newCfg)
+				})
 			}
 		}
 
@@ -212,12 +253,8 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 			Multiplier:  2.0,
 		}
 
-		// 先停止心跳并断开当前活跃连接
-		hb.Stop()
-		(*activeClient).Disconnect()
-
 		// 根据请求配置心跳
-		if req.Heartbeat {
+		if req.Heartbeat || packetCfg.IsPomelo() {
 			hb.SetEnable(true)
 			hb.SetPacketConfig(*packetCfg)
 		} else {
@@ -235,6 +272,47 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 
 		if err := (*activeClient).Connect(addr); err != nil {
 			return nil, fmt.Errorf("connect failed: %w", err)
+		}
+
+		// Pomelo 握手流程
+		if packetCfg.IsPomelo() {
+			hsPayload := []byte(`{"sys":{"type":"flow-packet","version":"1.0.0"},"user":{}}`)
+			if err := (*activeClient).Send(codec.PomeloEncodeHandshake(hsPayload)); err != nil {
+				(*activeClient).Disconnect()
+				return nil, fmt.Errorf("pomelo handshake send failed: %w", err)
+			}
+
+			// 等待握手响应
+			select {
+			case hsData := <-pomeloHandshakeCh:
+				var hsResp struct {
+					Code int `json:"code"`
+					Sys  struct {
+						Heartbeat int            `json:"heartbeat"`
+						Dict      map[string]int `json:"dict"`
+					} `json:"sys"`
+				}
+				if err := json.Unmarshal(hsData, &hsResp); err != nil {
+					(*activeClient).Disconnect()
+					return nil, fmt.Errorf("pomelo handshake parse failed: %w", err)
+				}
+				if hsResp.Code != 200 {
+					(*activeClient).Disconnect()
+					return nil, fmt.Errorf("pomelo handshake rejected: code %d", hsResp.Code)
+				}
+				fmt.Printf("[pomelo] handshake ok, heartbeat=%ds, routes=%d\n",
+					hsResp.Sys.Heartbeat, len(hsResp.Sys.Dict))
+
+			case <-time.After(10 * time.Second):
+				(*activeClient).Disconnect()
+				return nil, fmt.Errorf("pomelo handshake timeout")
+			}
+
+			// 发送握手确认
+			if err := (*activeClient).Send(codec.PomeloEncodeHandshakeAck()); err != nil {
+				(*activeClient).Disconnect()
+				return nil, fmt.Errorf("pomelo handshake ack failed: %w", err)
+			}
 		}
 
 		return map[string]string{"status": "connected"}, nil
@@ -276,6 +354,19 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 
 		// 设置响应解析器
 		runner.SetResponseResolver(func(route uint32) protoreflect.MessageDescriptor {
+			if cs == nil || cs.ParseResult == nil {
+				return nil
+			}
+			key := fmt.Sprintf("%d", route)
+			mapping, ok := cs.RouteMappings[key]
+			if !ok {
+				return nil
+			}
+			return cs.ParseResult.FindMessageDescriptor(mapping.ResponseMsg)
+		})
+
+		// 设置字符串路由响应解析器(Pomelo 模式)
+		runner.SetStringRouteResponseResolver(func(route string) protoreflect.MessageDescriptor {
 			if cs == nil || cs.ParseResult == nil {
 				return nil
 			}

@@ -175,15 +175,21 @@ func (c *WSClient) readLoop(conn *wsConnWrapper) {
 			continue
 		}
 
-		pkt, err := codec.DecodeBytes(msg, c.packetCfg)
-		if err != nil {
-			continue
-		}
-
-		if h := c.receiveHandler; h != nil {
-			encoded, encErr := codec.Encode(pkt, c.packetCfg)
-			if encErr == nil {
-				h(conn, encoded)
+		if c.packetCfg.IsPomelo() {
+			// Pomelo 模式: 直接透传原始字节
+			if h := c.receiveHandler; h != nil {
+				h(conn, msg)
+			}
+		} else {
+			pkt, err := codec.DecodeBytes(msg, c.packetCfg)
+			if err != nil {
+				continue
+			}
+			if h := c.receiveHandler; h != nil {
+				encoded, encErr := codec.Encode(pkt, c.packetCfg)
+				if encErr == nil {
+					h(conn, encoded)
+				}
 			}
 		}
 	}

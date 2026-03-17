@@ -171,6 +171,7 @@ export function FlowCanvas() {
         data: {
           messageName: message.Name,
           route: mapping?.route ?? 0,
+          stringRoute: mapping?.stringRoute,
           fields: {},
           responseFields: message.Fields?.map((f) => ({
             name: f.name,

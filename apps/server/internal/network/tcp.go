@@ -158,6 +158,7 @@ func (c *TCPClient) OnReceive(handler ReceiveHandler) {
 // readLoop 读 goroutine, 使用 codec.Decoder 解码帧
 func (c *TCPClient) readLoop(conn *tcpConnWrapper) {
 	decoder := codec.NewDecoder(conn.conn, c.packetCfg)
+	pomelo := c.packetCfg.IsPomelo()
 
 	for {
 		select {
@@ -166,19 +167,27 @@ func (c *TCPClient) readLoop(conn *tcpConnWrapper) {
 		default:
 		}
 
-		pkt, err := decoder.Decode()
+		var data []byte
+		var err error
+
+		if pomelo {
+			// Pomelo 模式: 直接透传原始字节, 避免 decode-reencode 丢失控制包信息
+			data, err = decoder.DecodeRaw()
+		} else {
+			var pkt *codec.Packet
+			pkt, err = decoder.Decode()
+			if err == nil {
+				data, err = codec.Encode(pkt, c.packetCfg)
+			}
+		}
+
 		if err != nil {
 			c.handleDisconnect(conn, err)
 			return
 		}
 
-		// 将解码后的 packet 重新编码为字节交给 receiveHandler
-		// 这样上层可以拿到完整的 Packet 信息
 		if h := c.receiveHandler; h != nil {
-			encoded, encErr := codec.Encode(pkt, c.packetCfg)
-			if encErr == nil {
-				h(conn, encoded)
-			}
+			h(conn, data)
 		}
 	}
 }

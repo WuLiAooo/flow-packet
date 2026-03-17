@@ -1,6 +1,7 @@
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useProtoStore, type FieldInfo, type MessageInfo } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { combineRoute, splitRoute } from '@/types/frame'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,6 +23,12 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   const getMessageByName = useProtoStore((s) => s.getMessageByName)
   const routeMappings = useProtoStore((s) => s.routeMappings)
   const routeFields = useConnectionStore((s) => s.routeFields)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const getConnection = useSavedConnectionStore((s) => s.getConnection)
+
+  const isPomelo = activeConnectionId
+    ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
+    : false
 
   if (!node) return null
 
@@ -51,12 +58,26 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   }
 
   const routeFromBrowser = routeMappings.some(
-    (m) => m.requestMsg === node.data.messageName && m.route !== 0
+    (m) => m.requestMsg === node.data.messageName && (m.route !== 0 || !!m.stringRoute)
   )
 
   return (
     <div className="grid gap-3">
-      {routeFields.length > 0 ? (
+      {isPomelo ? (
+        <div className="grid gap-2">
+          <Label htmlFor={`route-${nodeId}`}>路由</Label>
+          {routeFromBrowser && (
+            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+          )}
+          <Input
+            id={`route-${nodeId}`}
+            value={node.data.stringRoute ?? ''}
+            onChange={(e) => updateNodeData(nodeId, { stringRoute: e.target.value })}
+            placeholder="game.handler.login"
+            disabled={routeFromBrowser}
+          />
+        </div>
+      ) : routeFields.length > 0 ? (
         <div className="grid gap-2">
           <Label>路由</Label>
           {routeFromBrowser && (

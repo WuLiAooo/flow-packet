@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useProtoStore, type RouteMapping as RouteMappingType } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { combineRoute, splitRoute } from '@/types/frame'
 import { setRouteMapping, deleteRouteMapping } from '@/services/api'
 
@@ -13,38 +14,57 @@ export function RouteMapping() {
   const addMapping = useProtoStore((s) => s.addRouteMapping)
   const removeMapping = useProtoStore((s) => s.removeRouteMapping)
   const routeFields = useConnectionStore((s) => s.routeFields)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const getConnection = useSavedConnectionStore((s) => s.getConnection)
   const hasRouteFields = routeFields.length > 0
+
+  const isPomelo = activeConnectionId
+    ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
+    : false
 
   const [newRoute, setNewRoute] = useState('')
   const [newRouteValues, setNewRouteValues] = useState<Record<string, number>>({})
   const [newReqMsg, setNewReqMsg] = useState('')
   const [newRespMsg, setNewRespMsg] = useState('')
 
-  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
-
   const handleAdd = async () => {
-    const route = hasRouteFields
-      ? combineRoute(newRouteValues, routeFields)
-      : parseInt(newRoute)
-    if (!route || !newReqMsg || !activeConnectionId) return
+    if (!newReqMsg || !activeConnectionId) return
 
-    try {
-      await setRouteMapping(route, newReqMsg, newRespMsg, activeConnectionId)
-      addMapping({ route, requestMsg: newReqMsg, responseMsg: newRespMsg })
-      setNewRoute('')
-      setNewRouteValues({})
-      setNewReqMsg('')
-      setNewRespMsg('')
-    } catch (err) {
-      console.error('Set route mapping failed:', err)
+    if (isPomelo) {
+      if (!newRoute.trim()) return
+      const stringRoute = newRoute.trim()
+      try {
+        await setRouteMapping(0, newReqMsg, newRespMsg, activeConnectionId, stringRoute)
+        addMapping({ route: 0, stringRoute, requestMsg: newReqMsg, responseMsg: newRespMsg })
+        setNewRoute('')
+        setNewReqMsg('')
+        setNewRespMsg('')
+      } catch (err) {
+        console.error('Set route mapping failed:', err)
+      }
+    } else {
+      const route = hasRouteFields
+        ? combineRoute(newRouteValues, routeFields)
+        : parseInt(newRoute)
+      if (!route) return
+      try {
+        await setRouteMapping(route, newReqMsg, newRespMsg, activeConnectionId)
+        addMapping({ route, requestMsg: newReqMsg, responseMsg: newRespMsg })
+        setNewRoute('')
+        setNewRouteValues({})
+        setNewReqMsg('')
+        setNewRespMsg('')
+      } catch (err) {
+        console.error('Set route mapping failed:', err)
+      }
     }
   }
 
-  const handleDelete = async (route: number) => {
+  const handleDelete = async (mapping: RouteMappingType) => {
     if (!activeConnectionId) return
     try {
-      await deleteRouteMapping(route, activeConnectionId)
-      removeMapping(route)
+      await deleteRouteMapping(mapping.route, activeConnectionId, mapping.stringRoute)
+      removeMapping(mapping.route, mapping.stringRoute)
     } catch (err) {
       console.error('Delete route mapping failed:', err)
     }
@@ -54,7 +74,14 @@ export function RouteMapping() {
     <div className="flex flex-col gap-2 p-2">
       <div className="space-y-1">
         <div className="flex items-center gap-1">
-          {hasRouteFields ? (
+          {isPomelo ? (
+            <Input
+              placeholder="game.handler.login"
+              value={newRoute}
+              onChange={(e) => setNewRoute(e.target.value)}
+              className="h-6 text-xs flex-1 shrink-0"
+            />
+          ) : hasRouteFields ? (
             routeFields.map((rf) => (
               <Input
                 key={rf.name}
@@ -98,7 +125,7 @@ export function RouteMapping() {
 
       <ScrollArea className="max-h-40">
         {mappings.map((m) => (
-          <MappingRow key={m.route} mapping={m} onDelete={handleDelete} />
+          <MappingRow key={m.stringRoute || m.route} mapping={m} onDelete={handleDelete} isPomelo={isPomelo} />
         ))}
       </ScrollArea>
     </div>
@@ -108,19 +135,23 @@ export function RouteMapping() {
 function MappingRow({
   mapping,
   onDelete,
+  isPomelo,
 }: {
   mapping: RouteMappingType
-  onDelete: (route: number) => void
+  onDelete: (mapping: RouteMappingType) => void
+  isPomelo: boolean
 }) {
   const routeFields = useConnectionStore((s) => s.routeFields)
   const hasRouteFields = routeFields.length > 0
 
-  const routeDisplay = hasRouteFields
-    ? (() => {
-        const values = splitRoute(mapping.route, routeFields)
-        return routeFields.map((rf) => `${rf.name}:${values[rf.name] ?? 0}`).join(' ')
-      })()
-    : String(mapping.route)
+  const routeDisplay = isPomelo
+    ? mapping.stringRoute || ''
+    : hasRouteFields
+      ? (() => {
+          const values = splitRoute(mapping.route, routeFields)
+          return routeFields.map((rf) => `${rf.name}:${values[rf.name] ?? 0}`).join(' ')
+        })()
+      : String(mapping.route)
 
   return (
     <div className="flex items-center gap-1 py-0.5 text-xs">
@@ -138,7 +169,7 @@ function MappingRow({
         variant="ghost"
         size="sm"
         className="h-5 w-5 p-0"
-        onClick={() => onDelete(mapping.route)}
+        onClick={() => onDelete(mapping)}
       >
         <Trash2 className="w-3 h-3" style={{ color: 'var(--status-error)' }} />
       </Button>
