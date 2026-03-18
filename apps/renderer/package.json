@@ -3,13 +3,42 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "build": "tsc -b && vite build",
+    "build:electron": "tsc -p ../../electron/tsconfig.json && node -e \"const fs=require('fs');const p=require('path');const d='dist-electron';fs.readdirSync(d).filter(f=>f.endsWith('.js')).forEach(f=>fs.renameSync(p.join(d,f),p.join(d,f.replace('.js','.cjs'))))\"",
+    "build:all": "npm run build && npm run build:electron",
+    "pack": "npm run build:all && electron-builder --win",
     "lint": "eslint .",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.flow-packet.app",
+    "productName": "FlowPacket",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/flow-packet.exe",
+        "to": "go-backend/flow-packet.exe"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

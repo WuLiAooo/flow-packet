@@ -107,8 +107,10 @@ async function createWindow() {
     minWidth: 1000,
     minHeight: 600,
     backgroundColor: '#16162A',
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -119,7 +121,7 @@ async function createWindow() {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../apps/renderer/dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
   mainWindow.on('closed', () => {
@@ -129,6 +131,18 @@ async function createWindow() {
 
 // IPC: 渲染进程获取后端端口号
 ipcMain.handle('get-backend-port', () => backendPort)
+
+// IPC: 窗口控制
+ipcMain.handle('window-minimize', () => mainWindow?.minimize())
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize()
+  } else {
+    mainWindow?.maximize()
+  }
+})
+ipcMain.handle('window-close', () => mainWindow?.close())
+ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized())
 
 app.whenReady().then(async () => {
   try {

@@ -7,6 +7,7 @@ import { AppSidebar, type SidebarTab } from '@/components/layout/AppSidebar'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { CanvasTabs } from '@/components/layout/CanvasTabs'
 import { Toolbar } from '@/components/layout/Toolbar'
+import { TitleBar } from '@/components/layout/TitleBar'
 import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
 import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
 import { FlowCanvas } from '@/components/canvas/FlowCanvas'
@@ -133,12 +134,14 @@ function App() {
     useCollectionStore.getState().loadCollections(connection.id).catch(() => {})
 
     // 加载该连接的 proto 文件和路由映射
-    getProtoList(connection.id).then((result: { files?: unknown[]; messages?: unknown[] }) => {
-      setFiles((result.files ?? []) as import('@/stores/protoStore').FileInfo[])
-      setMessages((result.messages ?? []) as import('@/stores/protoStore').MessageInfo[])
+    getProtoList(connection.id).then((result: unknown) => {
+      const r = result as { files?: unknown[]; messages?: unknown[] }
+      setFiles((r.files ?? []) as import('@/stores/protoStore').FileInfo[])
+      setMessages((r.messages ?? []) as import('@/stores/protoStore').MessageInfo[])
     }).catch(() => {})
-    getRouteList(connection.id).then((result: { routes?: unknown[] }) => {
-      setRouteMappings((result.routes ?? []) as import('@/stores/protoStore').RouteMapping[])
+    getRouteList(connection.id).then((result: unknown) => {
+      const r = result as { routes?: unknown[] }
+      setRouteMappings((r.routes ?? []) as import('@/stores/protoStore').RouteMapping[])
     }).catch(() => {})
 
     // 判断是否为 Due 协议 (存在 header 字段且 bytes 为 1), 仅 Due 协议启用内置心跳
@@ -178,8 +181,11 @@ function App() {
   if (!activeConnectionId) {
     return (
       <>
-        <div className="flex h-svh w-full">
-          <WelcomePage onEnterConnection={handleEnterConnection} />
+        <div className="flex h-svh w-full flex-col">
+          <TitleBar />
+          <div className="flex flex-1 min-h-0">
+            <WelcomePage onEnterConnection={handleEnterConnection} />
+          </div>
         </div>
         <Toaster position="top-center" richColors />
       </>
@@ -190,6 +196,7 @@ function App() {
     <ReactFlowProvider>
       <SidebarProvider open={false} onOpenChange={() => {}}>
         <div className="flex h-svh flex-col w-full">
+          <TitleBar />
           {/* 顶部工具栏 - 全宽最高层级 */}
           <div className="flex items-center h-10 px-3 shrink-0 border-b border-border" style={{ background: 'var(--bg-toolbar)' }}>
             <Toolbar onBack={handleBackToWelcome} />
@@ -217,7 +224,7 @@ function App() {
                       onDragOver={onEmptyDragOver}
                       onDrop={onEmptyDrop}
                     >
-                      <img src="/remind-2.png" alt="remind" className="size-32 -mb-7 object-contain" />
+                      <img src="./remind-2.png" alt="remind" className="size-32 -mb-7 object-contain" />
                       <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight">
                         点击 + 新建页签，或拖入消息
                       </h3>
