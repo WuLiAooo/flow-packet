@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
-import type { RequestNodeData } from './canvasStore'
+import type { AnyNodeData } from './canvasStore'
 import { useCanvasStore } from './canvasStore'
 
 export interface CanvasTab {
   id: string
   name: string
   collectionId?: string
-  nodes: Node<RequestNodeData>[]
+  nodes: Node<AnyNodeData>[]
   edges: Edge[]
   dirty: boolean
 }
@@ -17,7 +17,7 @@ interface TabStore {
   activeTabId: string | null
 
   addTab: () => void
-  openTab: (name: string, collectionId: string, nodes: Node<RequestNodeData>[], edges: Edge[]) => void
+  openTab: (name: string, collectionId: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => void
   switchTab: (tabId: string) => void
   closeTab: (tabId: string) => void
   markClean: (tabId: string) => void

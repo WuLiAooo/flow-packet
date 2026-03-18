@@ -1,4 +1,4 @@
-import { Plug, Library, LayoutDashboard } from 'lucide-react'
+import { Library, LayoutDashboard } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,

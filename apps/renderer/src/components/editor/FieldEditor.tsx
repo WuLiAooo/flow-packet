@@ -1,4 +1,4 @@
-import { useCanvasStore } from '@/stores/canvasStore'
+import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useProtoStore, type FieldInfo, type MessageInfo } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
@@ -10,7 +10,6 @@ import { Separator } from '@/components/ui/separator'
 import { EnumSelector } from './inputs/EnumSelector'
 import { NestedEditor } from './inputs/NestedEditor'
 import { RepeatedEditor } from './inputs/RepeatedEditor'
-import { OneofEditor } from './inputs/OneofEditor'
 import { MapEditor } from './inputs/MapEditor'
 
 interface FieldEditorProps {
@@ -30,25 +29,26 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
     ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
     : false
 
-  if (!node) return null
+  if (!node || !('messageName' in node.data)) return null
 
-  const message = getMessageByName(node.data.messageName)
+  const data = node.data as RequestNodeData
+  const message = getMessageByName(data.messageName)
   if (!message) {
     return (
       <div className="text-xs text-muted-foreground">
-        未找到 Message 定义: {node.data.messageName}
+        未找到 Message 定义: {data.messageName}
       </div>
     )
   }
 
   const setFieldValue = (name: string, value: unknown) => {
     updateNodeData(nodeId, {
-      fields: { ...node.data.fields, [name]: value },
+      fields: { ...data.fields, [name]: value },
     })
   }
 
   const routeValues = routeFields.length > 0
-    ? splitRoute(node.data.route ?? 0, routeFields)
+    ? splitRoute(data.route ?? 0, routeFields)
     : null
 
   const handleRouteFieldChange = (fieldName: string, val: number) => {
@@ -58,7 +58,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   }
 
   const routeFromBrowser = routeMappings.some(
-    (m) => m.requestMsg === node.data.messageName && (m.route !== 0 || !!m.stringRoute)
+    (m) => m.requestMsg === data.messageName && (m.route !== 0 || !!m.stringRoute)
   )
 
   return (
@@ -71,7 +71,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
           )}
           <Input
             id={`route-${nodeId}`}
-            value={node.data.stringRoute ?? ''}
+            value={data.stringRoute ?? ''}
             onChange={(e) => updateNodeData(nodeId, { stringRoute: e.target.value })}
             placeholder="game.handler.login"
             disabled={routeFromBrowser}
@@ -104,7 +104,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
           )}
           <Input
             id={`route-${nodeId}`}
-            value={node.data.route ?? 0}
+            value={data.route ?? 0}
             onChange={(e) => updateNodeData(nodeId, { route: Number(e.target.value) })}
             disabled={routeFromBrowser}
           />
@@ -117,7 +117,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
         <FieldInput
           key={field.name}
           field={field}
-          value={node.data.fields[field.name]}
+          value={data.fields[field.name]}
           onChange={(v) => setFieldValue(field.name, v)}
           getMessage={getMessageByName}
         />

@@ -118,7 +118,7 @@ export function CreateConnectionDialog({
   const [port, setPort] = useState<number | ''>('')
   const [protocol, setProtocol] = useState<'tcp' | 'ws'>('tcp')
   const [codec, setCodec] = useState<'protobuf'>('protobuf')
-  const [color, setColor] = useState(COLOR_OPTIONS[0])
+  const [color, setColor] = useState<string>(COLOR_OPTIONS[0])
   const [testing, setTesting] = useState(false)
   const [showSaveTemplate, setShowSaveTemplate] = useState(false)
   const [templateName, setTemplateName] = useState('')

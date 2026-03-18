@@ -326,7 +326,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
         <div className="relative z-20 flex-1 overflow-auto p-4 lg:p-6">
           {connections.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full">
-              <img src="/remind.png" alt="remind" className="size-32 -mb-9 object-contain" />
+              <img src="./remind.png" alt="remind" className="size-32 -mb-9 object-contain" />
               <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight text-muted-foreground">
                 暂无连接，点击"创建连接"开始
               </h3>

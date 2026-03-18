@@ -1,4 +1,3 @@
-type MessageHandler = (data: ServerMessage) => void
 type EventCallback = (payload: unknown) => void
 
 export interface ClientMessage {

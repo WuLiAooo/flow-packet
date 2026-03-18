@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
-import type { RequestNodeData } from './canvasStore'
+import type { AnyNodeData } from './canvasStore'
 import * as api from '@/services/api'
 
 export interface CollectionFolder {
@@ -14,7 +14,7 @@ export interface Collection {
   id: string
   name: string
   folderId: string
-  nodes: Node<RequestNodeData>[]
+  nodes: Node<AnyNodeData>[]
   edges: Edge[]
   createdAt: number
   updatedAt: number
@@ -25,8 +25,8 @@ interface CollectionStore {
   collections: Collection[]
 
   loadCollections: (connectionId: string) => Promise<void>
-  saveCollection: (connectionId: string, name: string, folderId: string, nodes: Node<RequestNodeData>[], edges: Edge[]) => Promise<string>
-  updateCollection: (connectionId: string, id: string, nodes: Node<RequestNodeData>[], edges: Edge[]) => Promise<void>
+  saveCollection: (connectionId: string, name: string, folderId: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => Promise<string>
+  updateCollection: (connectionId: string, id: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => Promise<void>
   renameCollection: (connectionId: string, id: string, name: string) => Promise<void>
   deleteCollection: (connectionId: string, id: string) => Promise<void>
   createFolder: (connectionId: string, name: string, parentId: string) => Promise<CollectionFolder>

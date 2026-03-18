@@ -46,7 +46,7 @@ export function FlowCanvas() {
   const routeMappings = useProtoStore((s) => s.routeMappings)
   const theme = useTheme((s) => s.theme)
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
-  const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
+  const reactFlowInstance = useRef<ReactFlowInstance<Node<AnyNodeData>> | null>(null)
 
   // Ctrl+drag comment box drawing state
   const [drawingComment, setDrawingComment] = useState(false)
