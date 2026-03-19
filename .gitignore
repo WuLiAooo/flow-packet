@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-ssr/
 dist-electron/
+apps/renderer/release/
 
 # IDE
 .idea/
@@ -29,4 +30,3 @@ apps/server/tmp/
 
 # Github
 github/
-
