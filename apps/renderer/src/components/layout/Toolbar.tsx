@@ -48,10 +48,12 @@ export function Toolbar({ onBack }: ToolbarProps) {
     const isDueProtocol = connection.frameConfig?.fields?.some(
       (f) => f.name.toLowerCase() === 'header' && f.bytes === 1
     ) ?? false
+    const connectTimeout = useConnectionStore.getState().config.timeout || 5000
 
     try {
       await connectTCP(connection.host, connection.port, {
         protocol: connection.protocol,
+        timeout: connectTimeout,
         reconnect: true,
         heartbeat: isDueProtocol,
         frameFields: connection.frameConfig?.fields,

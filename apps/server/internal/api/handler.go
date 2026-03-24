@@ -13,35 +13,26 @@ import (
 	"time"
 
 	"github.com/flow-packet/server/internal/parser"
+	"github.com/flow-packet/server/internal/thriftparser"
 )
 
-// ConnState 单个连接的隔离状态, 持有该连接专属的 Proto 文件、路由映射和集合数据
 type ConnState struct {
 	ProtoDir       string
 	CollectionFile string
 	RouteFile      string
 	ParseResult    *parser.ParseResult
+	ThriftResult   *thriftparser.ParseResult
 	RouteMappings  map[string]RouteMapping
 }
-
-// AppState 应用状态, 在各 handler 间共享
 type AppState struct {
-	DataDir      string // 数据根目录
-	TemplateFile string // 模板 JSON 文件路径(全局共享)
+	DataDir      string
+	TemplateFile string
 	mu           sync.RWMutex
 	connections  map[string]*ConnState
 }
 
-// connIDRe 校验 connectionId 格式, 防止路径穿越
 var connIDRe = regexp.MustCompile(`^conn_\d+_[a-z0-9]+$`)
 
-// GetConnState 获取指定连接的隔离状态, 不存在则自动创建并解析已有 proto 文件
-//
-// 参数：
-//   - connID: 连接 ID, 需匹配 conn_{数字}_{小写字母数字} 格式
-//
-// 返回值：
-//   - *ConnState: 连接状态; connID 非法时返回 nil
 func (s *AppState) GetConnState(connID string) *ConnState {
 	if !connIDRe.MatchString(connID) {
 		return nil
@@ -56,8 +47,6 @@ func (s *AppState) GetConnState(connID string) *ConnState {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// 双重检查
 	if cs, ok = s.connections[connID]; ok {
 		return cs
 	}
@@ -73,40 +62,73 @@ func (s *AppState) GetConnState(connID string) *ConnState {
 		RouteFile:      routeFile,
 		RouteMappings:  make(map[string]RouteMapping),
 	}
-
-	// 加载已有路由映射
 	if routes, err := readRouteMappings(routeFile); err == nil {
 		for _, rm := range routes {
 			cs.RouteMappings[rm.Key()] = rm
 		}
 	}
 
-	// 解析已有 proto 文件
-	if result, err := parser.ParseProtoDir(protoDir); err == nil && len(result.Files) > 0 {
-		cs.ParseResult = result
+	if protoResult, thriftResult, err := loadSchemaDir(protoDir); err == nil {
+		cs.ParseResult = protoResult
+		cs.ThriftResult = thriftResult
 	}
 
 	s.connections[connID] = cs
 	return cs
 }
 
-// FrameField 协议帧字段定义
+func loadSchemaDir(dir string) (*parser.ParseResult, *thriftparser.ParseResult, error) {
+	var hasProto bool
+	var hasThrift bool
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".proto":
+			hasProto = true
+		case ".thrift":
+			hasThrift = true
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	if hasProto && hasThrift {
+		return nil, nil, fmt.Errorf("mixed proto and thrift files are not supported")
+	}
+	if hasProto {
+		result, err := parser.ParseProtoDir(dir)
+		return result, nil, err
+	}
+	if hasThrift {
+		result, err := thriftparser.ParseThriftDir(dir)
+		return nil, result, err
+	}
+	return nil, nil, nil
+}
+
 type FrameField struct {
 	Name    string `json:"name"`
 	Bytes   int    `json:"bytes"`
 	IsRoute bool   `json:"isRoute,omitempty"`
 	IsSeq   bool   `json:"isSeq,omitempty"`
 }
-
-// FrameTemplate 自定义协议帧模板
 type FrameTemplate struct {
 	ID        string       `json:"id"`
 	Name      string       `json:"name"`
 	Fields    []FrameField `json:"fields"`
 	ByteOrder string       `json:"byteOrder,omitempty"`
 }
-
-// RouteMapping route 值到 message 名称的映射
 type RouteMapping struct {
 	Route       uint32 `json:"route"`
 	StringRoute string `json:"stringRoute,omitempty"`
@@ -114,21 +136,12 @@ type RouteMapping struct {
 	ResponseMsg string `json:"responseMsg"`
 }
 
-// Key 返回路由映射的唯一标识, 字符串路由优先
 func (rm RouteMapping) Key() string {
 	if rm.StringRoute != "" {
 		return rm.StringRoute
 	}
 	return fmt.Sprintf("%d", rm.Route)
 }
-
-// NewAppState 创建应用状态
-//
-// 参数：
-//   - dataDir: 数据根目录, 模板文件存储在此目录下, 连接数据按 connectionId 隔离
-//
-// 返回值：
-//   - *AppState: 初始化完成的应用状态
 func NewAppState(dataDir string) *AppState {
 	return &AppState{
 		DataDir:      dataDir,
@@ -136,13 +149,8 @@ func NewAppState(dataDir string) *AppState {
 		connections:  make(map[string]*ConnState),
 	}
 }
-
-// RegisterHandlers 注册所有 API handlers
 func RegisterHandlers(srv *Server, state *AppState) {
-	// HTTP 路由
 	srv.HandleHTTP("POST /api/proto/upload", makeProtoUploadHandler(state, srv))
-
-	// WebSocket action 路由
 	srv.Handle("proto.list", makeProtoListHandler(state))
 	srv.Handle("route.list", makeRouteListHandler(state))
 	srv.Handle("route.set", makeRouteSetHandler(state))
@@ -150,8 +158,6 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("template.list", makeTemplateListHandler(state))
 	srv.Handle("template.save", makeTemplateSaveHandler(state))
 	srv.Handle("template.delete", makeTemplateDeleteHandler(state))
-
-	// 集合管理
 	srv.Handle("collection.list", makeCollectionListHandler(state))
 	srv.Handle("collection.save", makeCollectionSaveHandler(state))
 	srv.Handle("collection.update", makeCollectionUpdateHandler(state))
@@ -163,8 +169,6 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("collection.folder.move", makeCollectionFolderMoveHandler(state))
 	srv.Handle("collection.move", makeCollectionMoveHandler(state))
 }
-
-// makeProtoUploadHandler 创建 Proto 文件上传处理函数
 func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -192,29 +196,33 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			return
 		}
 
-		// 前端通过 paths 字段发送每个文件的相对路径(与 files 一一对应)
 		paths := r.MultipartForm.Value["paths"]
 
-		// 清空旧文件, 避免残留文件干扰解析
 		os.RemoveAll(cs.ProtoDir)
 		os.MkdirAll(cs.ProtoDir, 0755)
 
-		// 保存文件(保留子目录结构)
+		var schemaExt string
 		for i, fh := range files {
-			// 优先使用 paths 字段的相对路径, 回退到 fh.Filename
 			saveName := fh.Filename
 			if i < len(paths) && paths[i] != "" {
 				saveName = paths[i]
 			}
 
-			// 清理路径, 防止目录穿越
 			cleanName := filepath.Clean(saveName)
 			if strings.Contains(cleanName, "..") {
 				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid path: %s", saveName))
 				return
 			}
-			if filepath.Ext(cleanName) != ".proto" {
+
+			ext := strings.ToLower(filepath.Ext(cleanName))
+			if ext != ".proto" && ext != ".thrift" {
 				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid file type: %s", saveName))
+				return
+			}
+			if schemaExt == "" {
+				schemaExt = ext
+			} else if schemaExt != ext {
+				writeJSONError(w, http.StatusBadRequest, "mixed proto and thrift uploads are not supported")
 				return
 			}
 
@@ -225,7 +233,6 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			}
 
 			dstPath := filepath.Join(cs.ProtoDir, cleanName)
-			// 创建子目录
 			if dir := filepath.Dir(dstPath); dir != "." {
 				os.MkdirAll(dir, 0755)
 			}
@@ -242,11 +249,9 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			dst.Close()
 		}
 
-		// 解析整个 protoDir 下所有 proto 文件
-		result, err := parser.ParseProtoDir(cs.ProtoDir)
+		protoResult, thriftResult, err := loadSchemaDir(cs.ProtoDir)
 		if err != nil {
 			errMsg := err.Error()
-			// 提取缺失的依赖路径, 帮助用户定位问题
 			missing := extractMissingImports(errMsg)
 			if len(missing) > 0 {
 				w.WriteHeader(http.StatusBadRequest)
@@ -260,17 +265,26 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			return
 		}
 
-		cs.ParseResult = result
+		cs.ParseResult = protoResult
+		cs.ThriftResult = thriftResult
+
+		var filesResp any = []any{}
+		var messagesResp any = []any{}
+		if protoResult != nil {
+			filesResp = protoResult.Files
+			messagesResp = protoResult.AllMessages()
+		} else if thriftResult != nil {
+			filesResp = thriftResult.Files
+			messagesResp = thriftResult.AllMessages()
+		}
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]any{
-			"files":    result.Files,
-			"messages": result.AllMessages(),
+			"files":    filesResp,
+			"messages": messagesResp,
 		})
 	}
 }
-
-// makeProtoListHandler 创建 proto.list 处理函数
 func makeProtoListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -284,20 +298,31 @@ func makeProtoListHandler(state *AppState) HandlerFunc {
 		}
 
 		cs := state.GetConnState(req.ConnectionID)
-		if cs == nil || cs.ParseResult == nil {
+		if cs == nil {
 			return map[string]any{
 				"files":    []any{},
 				"messages": []any{},
 			}, nil
 		}
+		if cs.ParseResult != nil {
+			return map[string]any{
+				"files":    cs.ParseResult.Files,
+				"messages": cs.ParseResult.AllMessages(),
+			}, nil
+		}
+		if cs.ThriftResult != nil {
+			return map[string]any{
+				"files":    cs.ThriftResult.Files,
+				"messages": cs.ThriftResult.AllMessages(),
+			}, nil
+		}
 		return map[string]any{
-			"files":    cs.ParseResult.Files,
-			"messages": cs.ParseResult.AllMessages(),
+			"files":    []any{},
+			"messages": []any{},
 		}, nil
 	}
 }
 
-// makeRouteListHandler 创建 route.list 处理函数
 func makeRouteListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -319,8 +344,6 @@ func makeRouteListHandler(state *AppState) HandlerFunc {
 		return map[string]any{"routes": routes}, nil
 	}
 }
-
-// makeRouteSetHandler 创建 route.set 处理函数
 func makeRouteSetHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -349,8 +372,6 @@ func makeRouteSetHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeRouteDeleteHandler 创建 route.delete 处理函数
 func makeRouteDeleteHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -381,8 +402,6 @@ func makeRouteDeleteHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// readRouteMappings 从文件读取路由映射列表, 文件不存在时返回空列表
 func readRouteMappings(path string) ([]RouteMapping, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -397,8 +416,6 @@ func readRouteMappings(path string) ([]RouteMapping, error) {
 	}
 	return routes, nil
 }
-
-// writeRouteMappings 将路由映射写入文件
 func writeRouteMappings(path string, mappings map[string]RouteMapping) error {
 	routes := make([]RouteMapping, 0, len(mappings))
 	for _, rm := range mappings {
@@ -410,8 +427,6 @@ func writeRouteMappings(path string, mappings map[string]RouteMapping) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
-
-// readTemplates 从文件读取模板列表, 文件不存在时返回空列表
 func readTemplates(path string) ([]FrameTemplate, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -426,8 +441,6 @@ func readTemplates(path string) ([]FrameTemplate, error) {
 	}
 	return templates, nil
 }
-
-// writeTemplates 将模板列表写入文件
 func writeTemplates(path string, templates []FrameTemplate) error {
 	data, err := json.MarshalIndent(templates, "", "  ")
 	if err != nil {
@@ -435,8 +448,6 @@ func writeTemplates(path string, templates []FrameTemplate) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
-
-// makeTemplateListHandler 创建 template.list 处理函数
 func makeTemplateListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		templates, err := readTemplates(state.TemplateFile)
@@ -446,8 +457,6 @@ func makeTemplateListHandler(state *AppState) HandlerFunc {
 		return map[string]any{"templates": templates}, nil
 	}
 }
-
-// makeTemplateSaveHandler 创建 template.save 处理函数
 func makeTemplateSaveHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -484,8 +493,6 @@ func makeTemplateSaveHandler(state *AppState) HandlerFunc {
 		return map[string]any{"template": tpl}, nil
 	}
 }
-
-// makeTemplateDeleteHandler 创建 template.delete 处理函数
 func makeTemplateDeleteHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		var req struct {
@@ -517,15 +524,12 @@ func makeTemplateDeleteHandler(state *AppState) HandlerFunc {
 	}
 }
 
-// CollectionFolder 集合文件夹
 type CollectionFolder struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	ParentID  string `json:"parentId"`
 	CreatedAt int64  `json:"createdAt"`
 }
-
-// CollectionItem 集合中保存的画布
 type CollectionItem struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
@@ -535,14 +539,11 @@ type CollectionItem struct {
 	CreatedAt int64           `json:"createdAt"`
 	UpdatedAt int64           `json:"updatedAt"`
 }
-
-// CollectionData 集合持久化数据
 type CollectionData struct {
 	Folders []CollectionFolder `json:"folders"`
 	Items   []CollectionItem   `json:"items"`
 }
 
-// readCollections 从文件读取集合数据, 文件不存在时返回空数据
 func readCollections(path string) (*CollectionData, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -566,8 +567,6 @@ func readCollections(path string) (*CollectionData, error) {
 	}
 	return &col, nil
 }
-
-// writeCollections 将集合数据写入文件
 func writeCollections(path string, col *CollectionData) error {
 	data, err := json.MarshalIndent(col, "", "  ")
 	if err != nil {
@@ -575,16 +574,6 @@ func writeCollections(path string, col *CollectionData) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
-
-// getCollectionFile 从 payload 中提取 connectionId 并返回对应连接的集合文件路径
-//
-// 参数：
-//   - state: 应用状态
-//   - payload: 请求 payload, 需包含 connectionId 字段
-//
-// 返回值：
-//   - string: 集合文件路径
-//   - error: connectionId 缺失或非法时返回错误
 func getCollectionFile(state *AppState, payload json.RawMessage) (string, error) {
 	var base struct {
 		ConnectionID string `json:"connectionId"`
@@ -601,8 +590,6 @@ func getCollectionFile(state *AppState, payload json.RawMessage) (string, error)
 	}
 	return cs.CollectionFile, nil
 }
-
-// makeCollectionListHandler 创建 collection.list 处理函数
 func makeCollectionListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -616,8 +603,6 @@ func makeCollectionListHandler(state *AppState) HandlerFunc {
 		return col, nil
 	}
 }
-
-// makeCollectionSaveHandler 创建 collection.save 处理函数, 保存新画布到集合
 func makeCollectionSaveHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -660,8 +645,6 @@ func makeCollectionSaveHandler(state *AppState) HandlerFunc {
 		return map[string]any{"item": item}, nil
 	}
 }
-
-// makeCollectionUpdateHandler 创建 collection.update 处理函数, 更新已有集合的画布数据
 func makeCollectionUpdateHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -705,8 +688,6 @@ func makeCollectionUpdateHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionRenameHandler 创建 collection.rename 处理函数
 func makeCollectionRenameHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -748,8 +729,6 @@ func makeCollectionRenameHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionDeleteHandler 创建 collection.delete 处理函数
 func makeCollectionDeleteHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -785,8 +764,6 @@ func makeCollectionDeleteHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionFolderCreateHandler 创建 collection.folder.create 处理函数
 func makeCollectionFolderCreateHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -823,8 +800,6 @@ func makeCollectionFolderCreateHandler(state *AppState) HandlerFunc {
 		return map[string]any{"folder": folder}, nil
 	}
 }
-
-// makeCollectionFolderRenameHandler 创建 collection.folder.rename 处理函数
 func makeCollectionFolderRenameHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -865,8 +840,6 @@ func makeCollectionFolderRenameHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionFolderDeleteHandler 创建 collection.folder.delete 处理函数, 同时删除文件夹下所有子文件夹和集合
 func makeCollectionFolderDeleteHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -887,8 +860,6 @@ func makeCollectionFolderDeleteHandler(state *AppState) HandlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read collections: %w", err)
 		}
-
-		// 递归收集所有要删除的文件夹 ID
 		deleteIDs := map[string]bool{req.ID: true}
 		changed := true
 		for changed {
@@ -900,8 +871,6 @@ func makeCollectionFolderDeleteHandler(state *AppState) HandlerFunc {
 				}
 			}
 		}
-
-		// 过滤文件夹和集合
 		filteredFolders := make([]CollectionFolder, 0, len(col.Folders))
 		for _, f := range col.Folders {
 			if !deleteIDs[f.ID] {
@@ -923,8 +892,6 @@ func makeCollectionFolderDeleteHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionFolderMoveHandler 创建 collection.folder.move 处理函数, 移动文件夹到新的父文件夹
 func makeCollectionFolderMoveHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -946,8 +913,6 @@ func makeCollectionFolderMoveHandler(state *AppState) HandlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read collections: %w", err)
 		}
-
-		// 不能将文件夹移动到自身或其子文件夹下
 		if req.ID == req.ParentID {
 			return nil, fmt.Errorf("cannot move folder into itself")
 		}
@@ -984,8 +949,6 @@ func makeCollectionFolderMoveHandler(state *AppState) HandlerFunc {
 		return map[string]string{"status": "ok"}, nil
 	}
 }
-
-// makeCollectionMoveHandler 创建 collection.move 处理函数, 移动集合到新的文件夹
 func makeCollectionMoveHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
 		colFile, err := getCollectionFile(state, payload)
@@ -1032,10 +995,8 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// missingImportRe 匹配 protocompile 的 "could not resolve path" 错误
 var missingImportRe = regexp.MustCompile(`could not resolve path "([^"]+)"`)
 
-// extractMissingImports 从编译错误中提取缺失的 import 路径
 func extractMissingImports(errMsg string) []string {
 	matches := missingImportRe.FindAllStringSubmatch(errMsg, -1)
 	if len(matches) == 0 {

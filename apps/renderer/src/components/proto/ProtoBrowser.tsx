@@ -61,7 +61,7 @@ export function ProtoBrowser() {
     <div className="flex flex-col h-full px-2.5 overflow-hidden">
       <div className="flex items-center justify-between px-2 h-8 shrink-0">
         <span className="text-xs font-medium text-muted-foreground">
-          协议浏览器
+          闁告绻楅鍛硅箛姘兼綌闁?
         </span>
       </div>
 
@@ -70,14 +70,14 @@ export function ProtoBrowser() {
       </div>
 
       <div className="shrink-0 px-2 text-xs font-medium text-muted-foreground mb-2">
-        Proto 文件
+        Proto 闁哄倸娲ｅ▎?
       </div>
       <div className="shrink-0 flex items-center h-7 rounded-md border border-input shadow-xs" style={{ margin: '0 8px 6px' }}>
         <Search className="ml-2 w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索协议或消息..."
+          placeholder="闁瑰吋绮庨崒銊╁础韫囨凹鍞撮柟瀛樼墬缁夌兘骞?.."
           className="h-7 pl-2 text-xs border-0 shadow-none focus-visible:ring-0"
         />
       </div>
@@ -95,14 +95,14 @@ export function ProtoBrowser() {
         {files.length === 0 && (
           <div className="px-3 py-4 text-center">
             <span className="text-xs text-muted-foreground">
-              尚未导入 Proto 文件
+              閻忓繑纰嶅﹢顓犫偓鐢靛帶閸?Proto 闁哄倸娲ｅ▎?
             </span>
           </div>
         )}
         {isSearching && filteredFiles.length === 0 && files.length > 0 && (
           <div className="px-3 py-4 text-center">
             <span className="text-xs text-muted-foreground">
-              没有匹配的协议或消息
+              婵炲备鍓濆﹢渚€宕犺ぐ鎺戝赋闁汇劌瀚畷妤冩媼椤旇棄鐏楁繛鎴濈墛娴?
             </span>
           </div>
         )}
@@ -112,11 +112,15 @@ export function ProtoBrowser() {
 }
 
 function FileNode({ file, forceOpen }: { file: FileInfo; forceOpen?: boolean }) {
+  const [open, setOpen] = useState(false)
+
   return (
     <SidebarMenuItem>
       <Collapsible
-        defaultOpen
-        open={forceOpen || undefined}
+        open={forceOpen ? true : open}
+        onOpenChange={(next) => {
+          if (!forceOpen) setOpen(next)
+        }}
         className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
       >
         <CollapsibleTrigger asChild>
@@ -165,6 +169,7 @@ function MessageNode({ message }: { message: MessageInfo }) {
   const [singleRoute, setSingleRoute] = useState('')
   const [responseMsg, setResponseMsg] = useState('')
   const [responseMsgOpen, setResponseMsgOpen] = useState(false)
+  const defaultRoute = message.MessageID ?? 0
 
   const openDialog = () => {
     if (existing) {
@@ -177,8 +182,8 @@ function MessageNode({ message }: { message: MessageInfo }) {
       }
       setResponseMsg(existing.responseMsg)
     } else {
-      setRouteValues({})
-      setSingleRoute('')
+      setRouteValues(hasRouteFields && defaultRoute ? splitRoute(defaultRoute, routeFields) : {})
+      setSingleRoute(defaultRoute ? String(defaultRoute) : '')
       setResponseMsg('')
     }
     setDialogOpen(true)
@@ -239,24 +244,25 @@ function MessageNode({ message }: { message: MessageInfo }) {
       >
         <Box className="text-blue-500" />
         <span className="truncate">{message.ShortName}</span>
-        {existing && (
+        {(existing || defaultRoute !== 0) && (
           <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground">
-            {existing.stringRoute || existing.route}
+            {existing?.stringRoute || existing?.route || defaultRoute}
           </Badge>
         )}
       </SidebarMenuButton>
 
+      {dialogOpen && (
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>设置模板</DialogTitle>
+            <DialogTitle>閻犱礁澧介悿鍡椢熼埄鍐╃凡</DialogTitle>
             <DialogDescription>{message.ShortName}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
             {isPomelo ? (
               <div className="grid gap-2">
-                <Label>路由</Label>
+                <Label>Route</Label>
                 <Input
                   placeholder="game.handler.login"
                   value={singleRoute}
@@ -265,14 +271,14 @@ function MessageNode({ message }: { message: MessageInfo }) {
               </div>
             ) : hasRouteFields ? (
               <div className="grid gap-2">
-                <Label>路由</Label>
+                <Label>Route</Label>
                 <div className="flex items-center gap-2">
                   {routeFields.map((rf) => (
                     <div key={rf.name} className="flex-1 grid gap-1">
                       <span className="text-xs text-muted-foreground uppercase">{rf.name}</span>
                       <Input
                         type="number"
-                        value={routeValues[rf.name] ?? ''}
+                        value={routeValues[rf.name] ?? ""}
                         onChange={(e) =>
                           setRouteValues({ ...routeValues, [rf.name]: Number(e.target.value) || 0 })
                         }
@@ -283,10 +289,10 @@ function MessageNode({ message }: { message: MessageInfo }) {
               </div>
             ) : (
               <div className="grid gap-2">
-                <Label>路由</Label>
+                <Label>Route</Label>
                 <Input
                   type="number"
-                  placeholder="路由值"
+                  placeholder="Route"
                   value={singleRoute}
                   onChange={(e) => setSingleRoute(e.target.value)}
                 />
@@ -294,7 +300,7 @@ function MessageNode({ message }: { message: MessageInfo }) {
             )}
 
             <div className="grid gap-2">
-              <Label>响应 Message</Label>
+              <Label>Response Message</Label>
               <Popover open={responseMsgOpen} onOpenChange={setResponseMsgOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -305,38 +311,40 @@ function MessageNode({ message }: { message: MessageInfo }) {
                   >
                     {responseMsg
                       ? messages.find((m) => m.Name === responseMsg)?.ShortName ?? responseMsg
-                      : '选择响应消息 (可选)'}
+                      : "Select response message (optional)"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                  <Command>
-                    <CommandInput placeholder="搜索消息..." />
-                    <CommandList>
-                      <CommandEmpty>没有匹配的消息</CommandEmpty>
-                      <CommandGroup>
-                        {messages.map((m) => (
-                          <CommandItem
-                            key={m.Name}
-                            value={m.ShortName}
-                            onSelect={() => {
-                              setResponseMsg(responseMsg === m.Name ? '' : m.Name)
-                              setResponseMsgOpen(false)
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
-                                responseMsg === m.Name ? 'opacity-100' : 'opacity-0'
-                              )}
-                            />
-                            {m.ShortName}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
+                {responseMsgOpen && (
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                    <Command>
+                      <CommandInput placeholder="Search messages..." />
+                      <CommandList>
+                        <CommandEmpty>No matching messages</CommandEmpty>
+                        <CommandGroup>
+                          {messages.map((m) => (
+                            <CommandItem
+                              key={m.Name}
+                              value={m.ShortName}
+                              onSelect={() => {
+                                setResponseMsg(responseMsg === m.Name ? '' : m.Name)
+                                setResponseMsgOpen(false)
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  'mr-2 h-4 w-4',
+                                  responseMsg === m.Name ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                              {m.ShortName}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                )}
               </Popover>
             </div>
           </div>
@@ -345,14 +353,15 @@ function MessageNode({ message }: { message: MessageInfo }) {
             {existing && (
               <Button variant="destructive" size="sm" onClick={handleDelete} className="mr-auto">
                 <Trash2 className="size-4 mr-1" />
-                删除路由
+                闁告帞濞€濞呭海鎹勯婊勬殸
               </Button>
             )}
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button onClick={handleSave}>保存</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
     </>
   )
 }

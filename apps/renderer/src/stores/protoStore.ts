@@ -26,6 +26,7 @@ export interface EnumInfo {
 export interface MessageInfo {
   Name: string
   ShortName: string
+  MessageID?: number
   Fields: FieldInfo[]
   Oneofs: OneofInfo[] | null
   NestedMsgs: MessageInfo[] | null

@@ -13,8 +13,8 @@ import (
 
 // ParseResult 解析结果
 type ParseResult struct {
-	Files           []FileInfo                        // 按文件分组的 message 信息
-	fileDescriptors []protoreflect.FileDescriptor     // 编译后的文件描述符(用于运行时查找)
+	Files           []FileInfo                    // 按文件分组的 message 信息
+	fileDescriptors []protoreflect.FileDescriptor // 编译后的文件描述符(用于运行时查找)
 }
 
 // FileInfo 文件级别信息
@@ -27,25 +27,26 @@ type FileInfo struct {
 
 // MessageInfo 描述一个 Protobuf message
 type MessageInfo struct {
-	Name       string        // 全限定名称(package.MessageName)
-	ShortName  string        // 短名称(MessageName)
-	Fields     []FieldInfo   // 字段列表
-	Oneofs     []OneofInfo   // oneof 组
-	NestedMsgs []MessageInfo // 嵌套 message
-	NestedEnums []EnumInfo   // 嵌套 enum
+	Name        string        // 全限定名称(package.MessageName)
+	ShortName   string        // 短名称(MessageName)
+	MessageID   uint32        // 可选消息号(Thrift @Message)
+	Fields      []FieldInfo   // 字段列表
+	Oneofs      []OneofInfo   // oneof 组
+	NestedMsgs  []MessageInfo // 嵌套 message
+	NestedEnums []EnumInfo    // 嵌套 enum
 }
 
 // FieldInfo 描述一个字段
 type FieldInfo struct {
 	Name       string `json:"name"`
 	Number     int    `json:"number"`
-	Type       string `json:"type"`       // 类型名称(int32, string, MessageName 等)
-	Kind       string `json:"kind"`       // proto kind(message, enum, scalar 等)
-	IsRepeated bool   `json:"isRepeated"` // 是否 repeated
-	IsOptional bool   `json:"isOptional"` // 是否 optional
-	IsMap      bool   `json:"isMap"`      // 是否 map 类型
-	MapKey     string `json:"mapKey,omitempty"`   // map key 类型
-	MapValue   string `json:"mapValue,omitempty"` // map value 类型
+	Type       string `json:"type"`                // 类型名称(int32, string, MessageName 等)
+	Kind       string `json:"kind"`                // proto kind(message, enum, scalar 等)
+	IsRepeated bool   `json:"isRepeated"`          // 是否 repeated
+	IsOptional bool   `json:"isOptional"`          // 是否 optional
+	IsMap      bool   `json:"isMap"`               // 是否 map 类型
+	MapKey     string `json:"mapKey,omitempty"`    // map key 类型
+	MapValue   string `json:"mapValue,omitempty"`  // map value 类型
 	OneofName  string `json:"oneofName,omitempty"` // 所属 oneof 名称
 }
 

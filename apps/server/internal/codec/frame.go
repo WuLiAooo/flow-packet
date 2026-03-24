@@ -65,6 +65,7 @@ type PacketConfig struct {
 	SeqBytes    int                // seq 字段字节数
 	FieldDriven *FieldDrivenConfig // 非 nil 时启用字段驱动模式
 	Pomelo      *PomeloConfig      // 非 nil 时启用 Pomelo 模式
+	TopHero     *TopHeroConfig     // 非 nil 时启用 TopHero Thrift Compact 模式
 }
 
 // IsFieldDriven 返回是否使用字段驱动模式
@@ -75,6 +76,11 @@ func (c PacketConfig) IsFieldDriven() bool {
 // IsPomelo 返回是否使用 Pomelo 模式
 func (c PacketConfig) IsPomelo() bool {
 	return c.Pomelo != nil
+}
+
+// IsTopHero returns whether to use the TopHero custom frame mode.
+func (c PacketConfig) IsTopHero() bool {
+	return c.TopHero != nil
 }
 
 // DefaultPacketConfig 默认帧配置
@@ -98,6 +104,12 @@ type Packet struct {
 	StringRoute string // Pomelo 字符串路由(非空时优先使用)
 }
 
+// TopHeroConfig describes the custom frame used by the TopHero Java client:
+// flag(2) + seq(2) + msgType(2) + bodyLen(4) + thrift compact body.
+type TopHeroConfig struct {
+	VerifySequence bool
+}
+
 // IsHeartbeat 返回是否为心跳包
 func (p *Packet) IsHeartbeat() bool {
 	return p.Heartbeat
@@ -109,6 +121,9 @@ func (p *Packet) IsHeartbeat() bool {
 func Encode(pkt *Packet, cfg PacketConfig) ([]byte, error) {
 	if cfg.IsPomelo() {
 		return pomeloEncode(pkt, cfg.Pomelo)
+	}
+	if cfg.IsTopHero() {
+		return topHeroEncode(pkt, cfg.TopHero)
 	}
 	if cfg.IsFieldDriven() {
 		return fieldDrivenEncode(pkt, cfg.FieldDriven)
@@ -212,6 +227,9 @@ func DecodeBytes(data []byte, cfg PacketConfig) (*Packet, error) {
 	if cfg.IsPomelo() {
 		return pomeloDecodeBytes(data, cfg.Pomelo)
 	}
+	if cfg.IsTopHero() {
+		return topHeroDecodeBytes(data, cfg.TopHero)
+	}
 	if cfg.IsFieldDriven() {
 		return fieldDrivenDecodeBytes(data, cfg.FieldDriven)
 	}
@@ -281,6 +299,13 @@ func (d *Decoder) DecodeRaw() ([]byte, error) {
 	if d.cfg.IsPomelo() {
 		return pomeloDecodeRaw(d.reader)
 	}
+	if d.cfg.IsTopHero() {
+		pkt, err := d.Decode()
+		if err != nil {
+			return nil, err
+		}
+		return Encode(pkt, d.cfg)
+	}
 	// 非 Pomelo 模式: 解码后重新编码
 	pkt, err := d.Decode()
 	if err != nil {
@@ -296,6 +321,9 @@ func (d *Decoder) Decode() (*Packet, error) {
 			return nil, err
 		}
 		return pomeloDecodeBytes(raw, d.cfg.Pomelo)
+	}
+	if d.cfg.IsTopHero() {
+		return d.decodeTopHero()
 	}
 	if d.cfg.IsFieldDriven() {
 		return d.decodeFieldDriven()
@@ -535,6 +563,87 @@ func (d *Decoder) decodeFieldDriven() (*Packet, error) {
 	return &Packet{
 		Route: combineRouteFromFields(routeValues, cfg),
 		Seq:   seq,
+		Data:  body,
+	}, nil
+}
+
+const topHeroHeaderSize = 10
+
+func topHeroEncode(pkt *Packet, cfg *TopHeroConfig) ([]byte, error) {
+	if pkt.Route > 0xFFFF {
+		return nil, fmt.Errorf("tophero msgType out of range: %d", pkt.Route)
+	}
+	if pkt.Seq > 0xFFFF {
+		return nil, fmt.Errorf("tophero sequence out of range: %d", pkt.Seq)
+	}
+
+	flag := uint16(0)
+	if cfg == nil || cfg.VerifySequence {
+		flag = 1
+	}
+
+	buf := make([]byte, topHeroHeaderSize+len(pkt.Data))
+	binary.BigEndian.PutUint16(buf[0:2], flag)
+	binary.BigEndian.PutUint16(buf[2:4], uint16(pkt.Seq))
+	binary.BigEndian.PutUint16(buf[4:6], uint16(pkt.Route))
+	binary.BigEndian.PutUint32(buf[6:10], uint32(len(pkt.Data)))
+	copy(buf[topHeroHeaderSize:], pkt.Data)
+	return buf, nil
+}
+
+func topHeroDecodeBytes(data []byte, cfg *TopHeroConfig) (*Packet, error) {
+	if len(data) < topHeroHeaderSize {
+		return nil, fmt.Errorf("data too short: %d < %d", len(data), topHeroHeaderSize)
+	}
+
+	flag := binary.BigEndian.Uint16(data[0:2])
+	bodyLen := int(binary.BigEndian.Uint32(data[6:10]))
+	if len(data) < topHeroHeaderSize+bodyLen {
+		return nil, fmt.Errorf("incomplete packet: need %d bytes, have %d", topHeroHeaderSize+bodyLen, len(data))
+	}
+	if flag&(1<<15) != 0 {
+		return nil, errors.New("tophero compressed payload is not supported yet")
+	}
+	if flag&(1<<14) != 0 {
+		return nil, errors.New("tophero encrypted payload is not supported yet")
+	}
+
+	pkt := &Packet{
+		Seq:   uint32(binary.BigEndian.Uint16(data[2:4])),
+		Route: uint32(binary.BigEndian.Uint16(data[4:6])),
+	}
+	if bodyLen > 0 {
+		pkt.Data = data[topHeroHeaderSize : topHeroHeaderSize+bodyLen]
+	}
+	return pkt, nil
+}
+
+func (d *Decoder) decodeTopHero() (*Packet, error) {
+	header := make([]byte, topHeroHeaderSize)
+	if _, err := io.ReadFull(d.reader, header); err != nil {
+		return nil, err
+	}
+
+	flag := binary.BigEndian.Uint16(header[0:2])
+	bodyLen := int(binary.BigEndian.Uint32(header[6:10]))
+	if flag&(1<<15) != 0 {
+		return nil, errors.New("tophero compressed payload is not supported yet")
+	}
+	if flag&(1<<14) != 0 {
+		return nil, errors.New("tophero encrypted payload is not supported yet")
+	}
+
+	var body []byte
+	if bodyLen > 0 {
+		body = make([]byte, bodyLen)
+		if _, err := io.ReadFull(d.reader, body); err != nil {
+			return nil, fmt.Errorf("read payload: %w", err)
+		}
+	}
+
+	return &Packet{
+		Seq:   uint32(binary.BigEndian.Uint16(header[2:4])),
+		Route: uint32(binary.BigEndian.Uint16(header[4:6])),
 		Data:  body,
 	}, nil
 }

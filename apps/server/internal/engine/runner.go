@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/flow-packet/server/internal/codec"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// FlowNode 流程节点
 type FlowNode struct {
 	ID          string         `json:"id"`
 	MessageName string         `json:"messageName"`
@@ -20,13 +18,11 @@ type FlowNode struct {
 	Fields      map[string]any `json:"fields"`
 }
 
-// FlowEdge 流程边
 type FlowEdge struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 }
 
-// NodeResult 节点执行结果
 type NodeResult struct {
 	NodeID      string         `json:"nodeId"`
 	Success     bool           `json:"success"`
@@ -35,99 +31,105 @@ type NodeResult struct {
 	Request     map[string]any `json:"request"`
 	Response    map[string]any `json:"response"`
 	Error       string         `json:"error,omitempty"`
-	Duration    int64          `json:"duration"` // 毫秒
+	Duration    int64          `json:"duration"`
 }
 
-// NodeCallback 节点完成回调
 type NodeCallback func(result NodeResult)
 
-// MessageResolver 消息描述符解析器
-type MessageResolver func(messageName string) protoreflect.MessageDescriptor
+type MessageEncoder func(messageName string, fields map[string]any) ([]byte, error)
 
-// ResponseResolver 根据 route 获取响应消息描述符
-type ResponseResolver func(route uint32) protoreflect.MessageDescriptor
+type MessageDecoder func(messageName string, data []byte) (map[string]any, error)
 
-// StringRouteResponseResolver 根据字符串路由获取响应消息描述符
-type StringRouteResponseResolver func(route string) protoreflect.MessageDescriptor
+type ResponseNameResolver func(route uint32) string
 
-// Runner 串行流程执行器
+type StringRouteResponseNameResolver func(route string) string
+
 type Runner struct {
 	mu                     sync.Mutex
 	running                bool
 	cancel                 context.CancelFunc
 	seqCtx                 *SeqContext
 	packetCfg              codec.PacketConfig
+	thriftProtocol         string
 	timeout                time.Duration
 	sendFn                 func(data []byte) error
-	resolver               MessageResolver
-	responseResolver       ResponseResolver
-	stringResponseResolver StringRouteResponseResolver
+	encoder                MessageEncoder
+	decoder                MessageDecoder
+	responseResolver       ResponseNameResolver
+	stringResponseResolver StringRouteResponseNameResolver
 }
 
-// NewRunner 创建执行器
 func NewRunner(packetCfg codec.PacketConfig) *Runner {
 	return &Runner{
-		seqCtx:    NewSeqContext(),
-		packetCfg: packetCfg,
-		timeout:   5 * time.Second,
+		seqCtx:         NewSeqContext(),
+		packetCfg:      packetCfg,
+		thriftProtocol: "binary",
+		timeout:        5 * time.Second,
 	}
 }
 
-// SetPacketConfig 动态更新协议帧配置
 func (r *Runner) SetPacketConfig(cfg codec.PacketConfig) {
 	r.packetCfg = cfg
 }
 
-// SetSendFunc 设置发送函数
+func (r *Runner) SetThriftProtocol(protocol string) {
+	if protocol == "" {
+		protocol = "binary"
+	}
+	r.thriftProtocol = protocol
+}
+
+func (r *Runner) ThriftProtocol() string {
+	if r.thriftProtocol == "" {
+		return "binary"
+	}
+	return r.thriftProtocol
+}
+
 func (r *Runner) SetSendFunc(fn func(data []byte) error) {
 	r.sendFn = fn
 }
 
-// SetResolver 设置消息解析器
-func (r *Runner) SetResolver(resolver MessageResolver) {
-	r.resolver = resolver
+func (r *Runner) SetMessageEncoder(encoder MessageEncoder) {
+	r.encoder = encoder
 }
 
-// SetResponseResolver 设置响应消息解析器
-func (r *Runner) SetResponseResolver(resolver ResponseResolver) {
+func (r *Runner) SetMessageDecoder(decoder MessageDecoder) {
+	r.decoder = decoder
+}
+
+func (r *Runner) SetResponseNameResolver(resolver ResponseNameResolver) {
 	r.responseResolver = resolver
 }
 
-// SetStringRouteResponseResolver 设置字符串路由响应消息解析器
-func (r *Runner) SetStringRouteResponseResolver(resolver StringRouteResponseResolver) {
+func (r *Runner) SetStringRouteResponseNameResolver(resolver StringRouteResponseNameResolver) {
 	r.stringResponseResolver = resolver
 }
 
-// SetTimeout 设置响应超时
 func (r *Runner) SetTimeout(d time.Duration) {
 	r.timeout = d
 }
 
-// SeqCtx 获取 seq 上下文(供外部匹配响应)
 func (r *Runner) SeqCtx() *SeqContext {
 	return r.seqCtx
 }
 
-// Running 返回是否正在执行
 func (r *Runner) Running() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.running
 }
 
-// ResolveOrder 解析执行顺序, 返回有序节点 ID 列表
 func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("empty node list")
 	}
 
-	// 构建邻接表和入度表
 	nodeMap := make(map[string]*FlowNode)
 	inDegree := make(map[string]int)
-	outEdge := make(map[string]string) // source → target
+	outEdge := make(map[string]string)
 
 	for i := range nodes {
-		// 跳过注释节点等非执行节点
 		if strings.HasPrefix(nodes[i].ID, "comment") {
 			continue
 		}
@@ -140,7 +142,6 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 		inDegree[e.Target]++
 	}
 
-	// 找起点(入度为 0 的节点)
 	var starts []string
 	for id, deg := range inDegree {
 		if deg == 0 {
@@ -155,7 +156,6 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 		return nil, fmt.Errorf("multiple start nodes: %v", starts)
 	}
 
-	// 沿链遍历
 	order := make([]string, 0, len(nodes))
 	current := starts[0]
 	visited := make(map[string]bool)
@@ -176,7 +176,6 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 	return order, nil
 }
 
-// Execute 执行流程
 func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge, onNode NodeCallback) error {
 	order, err := ResolveOrder(nodes, edges)
 	if err != nil {
@@ -214,11 +213,10 @@ func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge
 		}
 
 		node := nodeMap[nodeID]
-		result := r.executeNode(execCtx, node)
+		result := r.executeNode(node)
 		if onNode != nil {
 			onNode(result)
 		}
-
 		if !result.Success {
 			return fmt.Errorf("node %s failed: %s", nodeID, result.Error)
 		}
@@ -227,7 +225,6 @@ func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge
 	return nil
 }
 
-// Stop 停止执行
 func (r *Runner) Stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -236,8 +233,7 @@ func (r *Runner) Stop() {
 	}
 }
 
-// executeNode 执行单个节点
-func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
+func (r *Runner) executeNode(node *FlowNode) NodeResult {
 	start := time.Now()
 
 	result := NodeResult{
@@ -246,36 +242,30 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 		Request:    node.Fields,
 	}
 
-	// 解析 message descriptor
-	if r.resolver == nil {
-		result.Error = "message resolver not configured"
+	if r.encoder == nil {
+		result.Error = "message encoder not configured"
+		result.Duration = time.Since(start).Milliseconds()
+		return result
+	}
+	if r.decoder == nil {
+		result.Error = "message decoder not configured"
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
 
-	reqMd := r.resolver(node.MessageName)
-	if reqMd == nil {
-		result.Error = fmt.Sprintf("message %q not found", node.MessageName)
-		result.Duration = time.Since(start).Milliseconds()
-		return result
-	}
-
-	// 动态编码
-	protoData, err := codec.DynamicEncode(reqMd, node.Fields)
+	payload, err := r.encoder(node.MessageName, node.Fields)
 	if err != nil {
 		result.Error = fmt.Sprintf("encode: %v", err)
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
 
-	// 分配 seq
 	seq, respCh := r.seqCtx.NextSeq()
 
-	// 封装协议帧
 	pkt := &codec.Packet{
 		Route:       node.Route,
 		Seq:         seq,
-		Data:        protoData,
+		Data:        payload,
 		StringRoute: node.StringRoute,
 	}
 
@@ -286,20 +276,17 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 		return result
 	}
 
-	// 发送
 	if r.sendFn == nil {
 		result.Error = "send function not configured"
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
-
 	if err := r.sendFn(frame); err != nil {
 		result.Error = fmt.Sprintf("send: %v", err)
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
 
-	// 等待响应
 	respData, err := r.seqCtx.WaitResponse(respCh, r.timeout)
 	if err != nil {
 		result.Error = fmt.Sprintf("wait response: %v", err)
@@ -307,18 +294,17 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 		return result
 	}
 
-	// 解码响应: 有 responseResolver 时尝试结构化解码, 否则退化为 hex
-	var respMd protoreflect.MessageDescriptor
+	var responseName string
 	if node.StringRoute != "" && r.stringResponseResolver != nil {
-		respMd = r.stringResponseResolver(node.StringRoute)
+		responseName = r.stringResponseResolver(node.StringRoute)
 	} else if r.responseResolver != nil {
-		respMd = r.responseResolver(node.Route)
+		responseName = r.responseResolver(node.Route)
 	}
-	if respMd != nil {
-		result.ResponseMsg = string(respMd.FullName())
+	if responseName != "" {
+		result.ResponseMsg = responseName
 	}
 
-	respFrame, err := codec.DynamicDecode(respData, respMd)
+	response, err := r.decoder(responseName, respData)
 	if err != nil {
 		result.Error = fmt.Sprintf("decode response: %v", err)
 		result.Duration = time.Since(start).Milliseconds()
@@ -326,7 +312,7 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode) NodeResult {
 	}
 
 	result.Success = true
-	result.Response = respFrame
+	result.Response = response
 	result.Duration = time.Since(start).Milliseconds()
 	return result
 }

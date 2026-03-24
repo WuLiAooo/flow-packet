@@ -170,7 +170,7 @@ export function FlowCanvas() {
         position,
         data: {
           messageName: message.Name,
-          route: mapping?.route ?? 0,
+          route: mapping?.route ?? message.MessageID ?? 0,
           stringRoute: mapping?.stringRoute,
           fields: {},
           responseFields: message.Fields?.map((f) => ({

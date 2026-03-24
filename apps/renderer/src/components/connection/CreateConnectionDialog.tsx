@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -127,6 +128,21 @@ export function CreateConnectionDialog({
   const isEdit = !!editConnection
 
   useEffect(() => {
+    if (open) return
+
+    const unlockBody = () => {
+      document.body.style.pointerEvents = ''
+      document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
+      document.body.removeAttribute('data-scroll-locked')
+    }
+
+    unlockBody()
+    const timer = window.setTimeout(unlockBody, 0)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  useEffect(() => {
     if (open) {
       if (editConnection) {
         setName(editConnection.name)
@@ -164,27 +180,79 @@ export function CreateConnectionDialog({
     }
   }, [step, frameType])
 
+  const resolveFrameConfig = (): FrameConfig => {
+    if (frameType === 'template') {
+      const tpl = FRAME_TEMPLATES.find((t) => t.id === selectedTemplateId)
+      if (tpl) {
+        if (tpl.id === 'tophero') {
+          return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: 'big', parserMode: 'tophero' }
+        }
+        if (tpl.id === 'cherry') {
+          const fields = cherryParser === 'simple'
+            ? [{ name: 'mid', bytes: 4, isRoute: true }, { name: 'len', bytes: 4 }]
+            : [{ name: 'type', bytes: 1 }, { name: 'length', bytes: 3 }]
+          return { type: 'template', templateId: tpl.id, fields, byteOrder: 'big', parserMode: cherryParser }
+        }
+        return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: 'big' }
+      }
+    }
+
+    if (frameType === 'saved') {
+      const tpl = savedTemplates.find((t) => t.id === selectedTemplateId)
+      if (tpl) {
+        return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: tpl.byteOrder ?? 'big' }
+      }
+    }
+
+    if (frameType === 'custom') {
+      return { type: 'custom', fields: customFields, byteOrder }
+    }
+
+    if (editConnection?.frameConfig) {
+      return editConnection.frameConfig
+    }
+
+    return { type: 'custom', fields: [], byteOrder: 'big' }
+  }
+
   const handleTest = async () => {
+    const targetHost = host.trim()
     const portNum = Number(port)
-    if (!host || !portNum) {
-      toast.error('请填写地址和端口')
+    if (!targetHost || !portNum) {
+      toast.error('Please enter host and port')
       return
     }
+
+    const frameConfig = resolveFrameConfig()
+
     setTesting(true)
     try {
-      await connectTCP(host, portNum, {
+      await connectTCP(targetHost, portNum, {
         protocol,
         timeout: 5000,
         reconnect: false,
         heartbeat: false,
+        frameFields: frameConfig.fields,
+        byteOrder: frameConfig.byteOrder,
+        parserMode: frameConfig.parserMode,
       })
-      toast.message('连接成功', {
-        description: `成功连接到 ${host}:${port}`,
+      toast.message('Connection succeeded', {
+        description: `${protocol.toUpperCase()} ${targetHost}:${portNum}`,
       })
       await disconnectTCP()
-    } catch {
-      toast.error('连接失败', {
-        description: `无法连接到 ${host}:${port}`,
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const hints: string[] = []
+
+      if (targetHost === '0.0.0.0') {
+        hints.push('Hint: 0.0.0.0 is a listen address, not a dial target. Try 127.0.0.1 or your LAN IP.')
+      }
+      if (protocol === 'ws') {
+        hints.push('Hint: WS test only supports ws://host:port. If the server needs /ws or another path, it will fail.')
+      }
+
+      toast.error('Connection failed', {
+        description: [`${protocol.toUpperCase()} ${targetHost}:${portNum}`, detail, ...hints].join(' | '),
       })
     } finally {
       setTesting(false)
@@ -192,21 +260,7 @@ export function CreateConnectionDialog({
   }
 
   const buildFrameConfig = (): FrameConfig => {
-    if (frameType === 'template') {
-      const tpl = FRAME_TEMPLATES.find((t) => t.id === selectedTemplateId)!
-      if (tpl.id === 'cherry') {
-        const fields = cherryParser === 'simple'
-          ? [{ name: 'mid', bytes: 4, isRoute: true }, { name: 'len', bytes: 4 }]
-          : [{ name: 'type', bytes: 1 }, { name: 'length', bytes: 3 }]
-        return { type: 'template', templateId: tpl.id, fields, byteOrder: 'big', parserMode: cherryParser }
-      }
-      return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: 'big' }
-    }
-    if (frameType === 'saved') {
-      const tpl = savedTemplates.find((t) => t.id === selectedTemplateId)!
-      return { type: 'template', templateId: tpl.id, fields: tpl.fields, byteOrder: tpl.byteOrder ?? 'big' }
-    }
-    return { type: 'custom', fields: customFields, byteOrder }
+    return resolveFrameConfig()
   }
 
   const handleSave = () => {
@@ -286,6 +340,9 @@ export function CreateConnectionDialog({
         )}
         showCloseButton={false}
       >
+        <DialogTitle className="sr-only">
+          {isEdit ? 'Edit Connection' : 'Create Connection'}
+        </DialogTitle>
         {/* Save template confirmation */}
         {showSaveTemplate && (
           <Card>
@@ -444,7 +501,7 @@ export function CreateConnectionDialog({
               <div className="flex flex-col divide-y rounded-lg border">
                 {FRAME_TEMPLATES.map((tpl) => {
                   const selected = selectedTemplateId === tpl.id
-                  const available = tpl.id === 'due' || tpl.id === 'cherry'
+                  const available = tpl.id === 'due' || tpl.id === 'cherry' || tpl.id === 'tophero'
                   return (
                     <button
                       key={tpl.id}

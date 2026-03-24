@@ -14,7 +14,7 @@ export interface FrameConfig {
   templateId?: string
   fields: FrameField[]
   byteOrder: ByteOrder
-  parserMode?: 'simple' | 'pomelo'
+  parserMode?: 'simple' | 'pomelo' | 'tophero'
 }
 
 export interface FrameTemplate {
@@ -77,6 +77,17 @@ export function splitRoute(combined: number, fields: FrameField[]): Record<strin
 }
 
 export const FRAME_TEMPLATES: FrameTemplate[] = [
+  {
+    id: 'tophero',
+    name: 'TopHero',
+    github: '',
+    fields: [
+      { name: 'flag', bytes: 2 },
+      { name: 'seq', bytes: 2, isSeq: true },
+      { name: 'msgType', bytes: 2, isRoute: true },
+      { name: 'len', bytes: 4 },
+    ],
+  },
   {
     id: 'due',
     name: 'Due',

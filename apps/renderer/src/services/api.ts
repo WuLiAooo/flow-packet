@@ -13,7 +13,7 @@ export async function connectTCP(host: string, port: number, options?: {
   heartbeat?: boolean
   frameFields?: { name: string; bytes: number; isRoute?: boolean; isSeq?: boolean }[]
   byteOrder?: 'big' | 'little'
-  parserMode?: 'simple' | 'pomelo'
+  parserMode?: 'simple' | 'pomelo' | 'tophero'
 }) {
   return sendRequest('conn.connect', { host, port, ...options })
 }

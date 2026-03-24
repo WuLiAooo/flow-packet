@@ -26,6 +26,42 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useCollectionStore } from '@/stores/collectionStore'
 import type { SavedConnection } from '@/stores/savedConnectionStore'
 
+interface DebugInfo {
+  bodyPointerEvents: string
+  bodyOverflow: string
+  bodyScrollLocked: string
+  dialogOverlays: number
+  alertOverlays: number
+  topElement: string
+}
+
+function unlockBodyInteraction() {
+  document.body.style.pointerEvents = ''
+  document.body.style.overflow = ''
+  document.body.style.paddingRight = ''
+  document.body.removeAttribute('data-scroll-locked')
+}
+
+function cleanupTransientPortals() {
+  document
+    .querySelectorAll(
+      '[data-slot="dialog-overlay"], [data-slot="dialog-portal"], [data-slot="alert-dialog-overlay"], [data-slot="alert-dialog-portal"]'
+    )
+    .forEach((node) => node.remove())
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    promise.then((value) => {
+      window.clearTimeout(timer)
+      resolve(value)
+    }).catch((err) => {
+      window.clearTimeout(timer)
+      reject(err)
+    })
+  })
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('画布')
@@ -40,6 +76,16 @@ function App() {
   const setRouteMappings = useProtoStore((s) => s.setRouteMappings)
   const setConfig = useConnectionStore((s) => s.setConfig)
   const setRouteFields = useConnectionStore((s) => s.setRouteFields)
+  const setTargetAddr = useConnectionStore((s) => s.setTargetAddr)
+  const connState = useConnectionStore((s) => s.state)
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
+    bodyPointerEvents: '',
+    bodyOverflow: '',
+    bodyScrollLocked: '',
+    dialogOverlays: 0,
+    alertOverlays: 0,
+    topElement: '',
+  })
 
   const onEmptyDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -50,10 +96,12 @@ function App() {
     e.preventDefault()
     const data = e.dataTransfer.getData('application/flow-packet-message')
     if (!data) return
+
     try {
       const message = JSON.parse(data)
       const mapping = routeMappings.find((m) => m.requestMsg === message.Name)
       addTab()
+
       const newNode: Node<RequestNodeData> = {
         id: `node_${Date.now()}`,
         type: 'requestNode',
@@ -69,6 +117,7 @@ function App() {
           })),
         },
       }
+
       addNode(newNode)
     } catch {
       // ignore
@@ -92,7 +141,6 @@ function App() {
       setConnectionStatusCallback((connected) => {
         if (connected) {
           console.log('[ws] connected to backend')
-          // 集合数据在进入连接时加载, 此处不再全局加载
         }
       })
 
@@ -105,10 +153,51 @@ function App() {
     return cleanup
   }, [])
 
-  const setTargetAddr = useConnectionStore((s) => s.setTargetAddr)
+  useEffect(() => {
+    if (!activeConnectionId) return
+
+    unlockBodyInteraction()
+    cleanupTransientPortals()
+
+    const timer = window.setInterval(() => {
+      unlockBodyInteraction()
+      cleanupTransientPortals()
+    }, 200)
+
+    const stopTimer = window.setTimeout(() => {
+      window.clearInterval(timer)
+    }, 3000)
+
+    return () => {
+      window.clearInterval(timer)
+      window.clearTimeout(stopTimer)
+    }
+  }, [activeConnectionId])
+
+  useEffect(() => {
+    const updateDebugInfo = () => {
+      const centerX = Math.max(0, Math.floor(window.innerWidth / 2))
+      const centerY = Math.max(0, Math.floor(window.innerHeight / 2))
+      const top = document.elementFromPoint(centerX, centerY)
+
+      setDebugInfo({
+        bodyPointerEvents: document.body.style.pointerEvents || '(empty)',
+        bodyOverflow: document.body.style.overflow || '(empty)',
+        bodyScrollLocked: document.body.getAttribute('data-scroll-locked') || '(none)',
+        dialogOverlays: document.querySelectorAll('[data-slot="dialog-overlay"], [data-slot="dialog-portal"]').length,
+        alertOverlays: document.querySelectorAll('[data-slot="alert-dialog-overlay"], [data-slot="alert-dialog-portal"]').length,
+        topElement: top instanceof HTMLElement
+          ? `${top.tagName.toLowerCase()}.${top.className || '(no-class)'}`
+          : '(none)',
+      })
+    }
+
+    updateDebugInfo()
+    const timer = window.setInterval(updateDebugInfo, 300)
+    return () => window.clearInterval(timer)
+  }, [activeConnectionId, connState])
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
-    // 重置连接状态, 避免上一次连接的状态残留
     useConnectionStore.getState().setState('disconnected')
 
     setConfig({
@@ -119,54 +208,54 @@ function App() {
     setTargetAddr(`${connection.host}:${connection.port}`)
     setActiveConnectionId(connection.id)
 
-    // 提取路由字段定义
     const routeFields = connection.frameConfig?.fields.filter((f) => f.isRoute) ?? []
     setRouteFields(routeFields)
 
-    // 重置执行状态和日志
     const execStore = useExecutionStore.getState()
     execStore.clearLogs()
     execStore.resetNodeStatuses()
     execStore.setStatus('idle')
 
-    // 重置画布 tab 并加载该连接的集合数据
     useTabStore.getState().resetTabs()
     useCollectionStore.getState().loadCollections(connection.id).catch(() => {})
 
-    // 加载该连接的 proto 文件和路由映射
     getProtoList(connection.id).then((result: unknown) => {
       const r = result as { files?: unknown[]; messages?: unknown[] }
       setFiles((r.files ?? []) as import('@/stores/protoStore').FileInfo[])
       setMessages((r.messages ?? []) as import('@/stores/protoStore').MessageInfo[])
     }).catch(() => {})
+
     getRouteList(connection.id).then((result: unknown) => {
       const r = result as { routes?: unknown[] }
       setRouteMappings((r.routes ?? []) as import('@/stores/protoStore').RouteMapping[])
     }).catch(() => {})
 
-    // 判断是否为 Due 协议 (存在 header 字段且 bytes 为 1), 仅 Due 协议启用内置心跳
     const isDueProtocol = connection.frameConfig?.fields?.some(
       (f) => f.name.toLowerCase() === 'header' && f.bytes === 1
     ) ?? false
+    const connectTimeout = useConnectionStore.getState().config.timeout || 5000
 
-    // 自动建立连接, 成功时 toast 提示, 失败时 toast 提示但不阻塞进入画布
-    connectTCP(connection.host, connection.port, {
+    useConnectionStore.getState().setState('connecting')
+    withTimeout(connectTCP(connection.host, connection.port, {
       protocol: connection.protocol,
+      timeout: connectTimeout,
       reconnect: true,
       heartbeat: isDueProtocol,
       frameFields: connection.frameConfig?.fields,
       byteOrder: connection.frameConfig?.byteOrder,
       parserMode: connection.frameConfig?.parserMode,
-    }).then(() => {
+    }), 10000, 'Connect request timed out').then(() => {
+      useConnectionStore.getState().setState('connected')
       toast.success('连接成功', {
         description: `已连接到 ${connection.host}:${connection.port}`,
       })
     }).catch((err) => {
+      useConnectionStore.getState().setState('disconnected')
       toast.error('连接失败', {
         description: err instanceof Error ? err.message : String(err),
       })
     })
-  }, [setConfig, setTargetAddr, setRouteFields, setActiveConnectionId, setFiles, setMessages, setRouteMappings])
+  }, [setActiveConnectionId, setConfig, setFiles, setMessages, setRouteFields, setRouteMappings, setTargetAddr])
 
   const handleBackToWelcome = useCallback(() => {
     setFiles([])
@@ -175,9 +264,8 @@ function App() {
     setActiveConnectionId(null)
     useTabStore.getState().resetTabs()
     useCollectionStore.getState().clearCollections()
-  }, [setFiles, setMessages, setRouteMappings, setActiveConnectionId])
+  }, [setActiveConnectionId, setFiles, setMessages, setRouteMappings])
 
-  // 欢迎页面 - 无活跃连接时显示
   if (!activeConnectionId) {
     return (
       <>
@@ -197,12 +285,10 @@ function App() {
       <SidebarProvider open={false} onOpenChange={() => {}}>
         <div className="flex h-svh flex-col w-full">
           <TitleBar />
-          {/* 顶部工具栏 - 全宽最高层级 */}
           <div className="flex items-center h-10 px-3 shrink-0 border-b border-border" style={{ background: 'var(--bg-toolbar)' }}>
             <Toolbar onBack={handleBackToWelcome} />
           </div>
 
-          {/* 下方区域：导航栏 + 内容 */}
           <div className="flex flex-1 min-h-0">
             <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} />
             <div className="flex-1 min-w-0">
@@ -235,6 +321,15 @@ function App() {
               />
             </div>
           </div>
+        </div>
+        <div className="pointer-events-none fixed right-2 bottom-2 z-[9999] max-w-[460px] rounded border bg-background/95 px-3 py-2 font-mono text-[11px] shadow-lg">
+          <div>state: {connState}</div>
+          <div>body.pointerEvents: {debugInfo.bodyPointerEvents}</div>
+          <div>body.overflow: {debugInfo.bodyOverflow}</div>
+          <div>body.scrollLocked: {debugInfo.bodyScrollLocked}</div>
+          <div>dialogOverlays: {debugInfo.dialogOverlays}</div>
+          <div>alertOverlays: {debugInfo.alertOverlays}</div>
+          <div>topAtCenter: {debugInfo.topElement}</div>
         </div>
         <PropertySheet />
         <Toaster position="top-center" richColors />

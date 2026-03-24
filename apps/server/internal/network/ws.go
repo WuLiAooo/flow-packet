@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/flow-packet/server/internal/codec"
 	"github.com/gorilla/websocket"
@@ -18,9 +19,10 @@ type WSClient struct {
 	conn  *websocket.Conn
 	addr  string // 目标地址, 用于重连
 
-	packetCfg    codec.PacketConfig
-	reconnectCfg ReconnectConfig
-	reconnector  *Reconnector
+	packetCfg      codec.PacketConfig
+	reconnectCfg   ReconnectConfig
+	connectTimeout time.Duration
+	reconnector    *Reconnector
 
 	connectHandler    ConnectHandler
 	disconnectHandler DisconnectHandler
@@ -33,10 +35,11 @@ type WSClient struct {
 // NewWSClient 创建 WebSocket 网关客户端
 func NewWSClient(cfg codec.PacketConfig) *WSClient {
 	return &WSClient{
-		state:        ConnStateDisconnected,
-		packetCfg:    cfg,
-		reconnectCfg: DefaultReconnectConfig(),
-		sendCh:       make(chan []byte, 256),
+		state:          ConnStateDisconnected,
+		packetCfg:      cfg,
+		reconnectCfg:   DefaultReconnectConfig(),
+		connectTimeout: 5 * time.Second,
+		sendCh:         make(chan []byte, 256),
 	}
 }
 
@@ -50,6 +53,16 @@ func (c *WSClient) SetReconnectConfig(cfg ReconnectConfig) {
 	c.reconnectCfg = cfg
 }
 
+// SetConnectTimeout 设置建立连接时的超时
+func (c *WSClient) SetConnectTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	c.mu.Lock()
+	c.connectTimeout = timeout
+	c.mu.Unlock()
+}
+
 // Connect 建立 WebSocket 连接
 func (c *WSClient) Connect(addr string) error {
 	c.mu.Lock()
@@ -58,10 +71,14 @@ func (c *WSClient) Connect(addr string) error {
 		return nil
 	}
 	c.state = ConnStateConnecting
+	timeout := c.connectTimeout
 	c.mu.Unlock()
 
 	u := url.URL{Scheme: "ws", Host: addr}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = timeout
+	dialer.NetDialContext = (&net.Dialer{Timeout: timeout}).DialContext
+	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		c.mu.Lock()
 		c.state = ConnStateDisconnected

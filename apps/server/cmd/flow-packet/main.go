@@ -15,7 +15,6 @@ import (
 	"github.com/flow-packet/server/internal/codec"
 	"github.com/flow-packet/server/internal/engine"
 	"github.com/flow-packet/server/internal/network"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func main() {
@@ -194,8 +193,17 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 					UseRouteCompress: true,
 				},
 			}
+			runner.SetThriftProtocol("binary")
 			applyConfig(newCfg)
+		} else if req.ParserMode == "tophero" {
+			runner.SetThriftProtocol("compact")
+			applyConfig(codec.PacketConfig{
+				TopHero: &codec.TopHeroConfig{
+					VerifySequence: true,
+				},
+			})
 		} else if len(req.FrameFields) > 0 {
+			runner.SetThriftProtocol("binary")
 			// 根据 frameFields 动态计算 PacketConfig
 			// Due 检测: 存在 name=="header" && bytes==1 -> legacy 模式
 			isDue := false
@@ -241,9 +249,15 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 					FieldDriven: fdCfg,
 				})
 			}
+		} else {
+			runner.SetThriftProtocol("binary")
 		}
 
 		addr := fmt.Sprintf("%s:%d", req.Host, req.Port)
+		connectTimeout := 5 * time.Second
+		if req.Timeout > 0 {
+			connectTimeout = time.Duration(req.Timeout) * time.Millisecond
+		}
 
 		reconnectCfg := network.ReconnectConfig{
 			Enable:      req.Reconnect,
@@ -265,14 +279,18 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 		if req.Protocol == "ws" {
 			*activeClient = wsClient
 			wsClient.SetReconnectConfig(reconnectCfg)
+			wsClient.SetConnectTimeout(connectTimeout)
 		} else {
 			*activeClient = tcpClient
 			tcpClient.SetReconnectConfig(reconnectCfg)
+			tcpClient.SetConnectTimeout(connectTimeout)
 		}
 
+		fmt.Printf("[conn.connect] protocol=%s addr=%s timeout=%s parser=%s\n", req.Protocol, addr, connectTimeout, req.ParserMode)
 		if err := (*activeClient).Connect(addr); err != nil {
 			return nil, fmt.Errorf("connect failed: %w", err)
 		}
+		fmt.Printf("[conn.connect] connected addr=%s state=%s\n", addr, (*activeClient).State().String())
 
 		// Pomelo 握手流程
 		if packetCfg.IsPomelo() {
@@ -342,46 +360,65 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 		}
 
 		cs := state.GetConnState(req.ConnectionID)
+		if cs == nil {
+			return nil, fmt.Errorf("connection state not found")
+		}
 
-		// 设置消息解析器
-		runner.SetResolver(func(messageName string) protoreflect.MessageDescriptor {
-			if cs == nil || cs.ParseResult == nil {
-				return nil
-			}
-			md := cs.ParseResult.FindMessageDescriptor(messageName)
-			return md
-		})
+		switch {
+		case cs.ThriftResult != nil:
+			runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
+				md := cs.ThriftResult.FindMessageDescriptor(messageName)
+				if md == nil {
+					return nil, fmt.Errorf("message %q not found", messageName)
+				}
+				if runner.ThriftProtocol() == "compact" {
+					return codec.DynamicThriftCompactEncode(md, fields)
+				}
+				return codec.DynamicThriftEncode(md, fields)
+			})
+			runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
+				if runner.ThriftProtocol() == "compact" {
+					return codec.DynamicThriftCompactDecode(data, cs.ThriftResult.FindMessageDescriptor(messageName))
+				}
+				return codec.DynamicThriftDecode(data, cs.ThriftResult.FindMessageDescriptor(messageName))
+			})
+		case cs.ParseResult != nil:
+			runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
+				md := cs.ParseResult.FindMessageDescriptor(messageName)
+				if md == nil {
+					return nil, fmt.Errorf("message %q not found", messageName)
+				}
+				return codec.DynamicEncode(md, fields)
+			})
+			runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
+				return codec.DynamicDecode(data, cs.ParseResult.FindMessageDescriptor(messageName))
+			})
+		default:
+			return nil, fmt.Errorf("no schema imported for connection")
+		}
 
-		// 设置响应解析器
-		runner.SetResponseResolver(func(route uint32) protoreflect.MessageDescriptor {
-			if cs == nil || cs.ParseResult == nil {
-				return nil
-			}
+		runner.SetResponseNameResolver(func(route uint32) string {
 			key := fmt.Sprintf("%d", route)
 			mapping, ok := cs.RouteMappings[key]
 			if !ok {
-				return nil
+				if cs.ThriftResult != nil {
+					return cs.ThriftResult.FindMessageNameByID(route)
+				}
+				return ""
 			}
-			return cs.ParseResult.FindMessageDescriptor(mapping.ResponseMsg)
+			return mapping.ResponseMsg
 		})
 
-		// 设置字符串路由响应解析器(Pomelo 模式)
-		runner.SetStringRouteResponseResolver(func(route string) protoreflect.MessageDescriptor {
-			if cs == nil || cs.ParseResult == nil {
-				return nil
-			}
+		runner.SetStringRouteResponseNameResolver(func(route string) string {
 			mapping, ok := cs.RouteMappings[route]
 			if !ok {
-				return nil
+				return ""
 			}
-			return cs.ParseResult.FindMessageDescriptor(mapping.ResponseMsg)
+			return mapping.ResponseMsg
 		})
 
-		// 异步执行
 		go func() {
-			srv.Broadcast(api.ServerMessage{
-				Event: "flow.started",
-			})
+			srv.Broadcast(api.ServerMessage{Event: "flow.started"})
 
 			err := runner.Execute(context.Background(), req.Nodes, req.Edges, func(result engine.NodeResult) {
 				if result.Success {
@@ -389,12 +426,12 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 						Event:   "node.result",
 						Payload: result,
 					})
-				} else {
-					srv.Broadcast(api.ServerMessage{
-						Event:   "node.error",
-						Payload: map[string]any{"nodeId": result.NodeID, "error": result.Error},
-					})
+					return
 				}
+				srv.Broadcast(api.ServerMessage{
+					Event:   "node.error",
+					Payload: map[string]any{"nodeId": result.NodeID, "error": result.Error},
+				})
 			})
 
 			if err != nil {
@@ -402,11 +439,9 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 					Event:   "flow.error",
 					Payload: map[string]any{"error": err.Error()},
 				})
-			} else {
-				srv.Broadcast(api.ServerMessage{
-					Event: "flow.complete",
-				})
+				return
 			}
+			srv.Broadcast(api.ServerMessage{Event: "flow.complete"})
 		}()
 
 		return map[string]string{"status": "started"}, nil

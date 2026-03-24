@@ -3,6 +3,7 @@ package network
 import (
 	"net"
 	"sync"
+	"time"
 
 	"github.com/flow-packet/server/internal/codec"
 )
@@ -15,9 +16,10 @@ type TCPClient struct {
 	conn  net.Conn
 	addr  string // 目标地址, 用于重连
 
-	packetCfg    codec.PacketConfig
-	reconnectCfg ReconnectConfig
-	reconnector  *Reconnector
+	packetCfg      codec.PacketConfig
+	reconnectCfg   ReconnectConfig
+	connectTimeout time.Duration
+	reconnector    *Reconnector
 
 	connectHandler    ConnectHandler
 	disconnectHandler DisconnectHandler
@@ -30,10 +32,11 @@ type TCPClient struct {
 // NewTCPClient 创建 TCP 客户端
 func NewTCPClient(cfg codec.PacketConfig) *TCPClient {
 	return &TCPClient{
-		state:        ConnStateDisconnected,
-		packetCfg:    cfg,
-		reconnectCfg: DefaultReconnectConfig(),
-		sendCh:       make(chan []byte, 256),
+		state:          ConnStateDisconnected,
+		packetCfg:      cfg,
+		reconnectCfg:   DefaultReconnectConfig(),
+		connectTimeout: 5 * time.Second,
+		sendCh:         make(chan []byte, 256),
 	}
 }
 
@@ -47,6 +50,16 @@ func (c *TCPClient) SetReconnectConfig(cfg ReconnectConfig) {
 	c.reconnectCfg = cfg
 }
 
+// SetConnectTimeout 设置建立连接时的超时
+func (c *TCPClient) SetConnectTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	c.mu.Lock()
+	c.connectTimeout = timeout
+	c.mu.Unlock()
+}
+
 // Connect 建立 TCP 连接
 func (c *TCPClient) Connect(addr string) error {
 	c.mu.Lock()
@@ -55,9 +68,10 @@ func (c *TCPClient) Connect(addr string) error {
 		return nil
 	}
 	c.state = ConnStateConnecting
+	timeout := c.connectTimeout
 	c.mu.Unlock()
 
-	conn, err := net.Dial("tcp", addr)
+	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		c.mu.Lock()
 		c.state = ConnStateDisconnected

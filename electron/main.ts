@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
+import fs from 'fs'
 import path from 'path'
 
 // 禁用 GPU 硬件加速，修复 Windows 无边框窗口下画布拖拽和连线的渲染残影问题
@@ -8,12 +9,39 @@ app.disableHardwareAcceleration()
 let mainWindow: BrowserWindow | null = null
 let goProcess: ChildProcess | null = null
 let backendPort: number | null = null
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
+const isDevMode = !app.isPackaged
+const BACKEND_STARTUP_TIMEOUT_MS = 30000
+
+function getDevBackendDir(): string {
+  return path.join(__dirname, '..', '..', 'server', 'cmd', 'flow-packet')
+}
+
+function getGoCommand(): string {
+  const executable = process.platform === 'win32' ? 'go.exe' : 'go'
+  const candidates = [
+    process.env.GO_EXECUTABLE,
+    process.env.GOROOT ? path.join(process.env.GOROOT, 'bin', executable) : undefined,
+    process.platform === 'win32' ? 'C:\\Program Files\\Go\\bin\\go.exe' : '/usr/local/go/bin/go',
+    'go',
+  ].filter((value): value is string => Boolean(value))
+
+  for (const candidate of candidates) {
+    if (candidate === 'go') {
+      return candidate
+    }
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+  }
+
+  return 'go'
+}
 
 function getGoExecutablePath(): string {
-  const isDev = !!process.env.VITE_DEV_SERVER_URL
-  if (isDev) {
+  if (isDevMode) {
     // 开发模式：使用 go run 或预编译的二进制
-    return path.join(__dirname, '..', 'apps', 'server', 'cmd', 'flow-packet')
+    return getDevBackendDir()
   }
   // 生产模式：打包的二进制文件
   const ext = process.platform === 'win32' ? '.exe' : ''
@@ -22,25 +50,26 @@ function getGoExecutablePath(): string {
 
 function startGoBackend(): Promise<number> {
   return new Promise((resolve, reject) => {
+    let settled = false
     const timeout = setTimeout(() => {
-      reject(new Error('Go backend startup timeout (10s)'))
-    }, 10000)
+      if (!settled) {
+        settled = true
+        reject(new Error(`Go backend startup timeout (${BACKEND_STARTUP_TIMEOUT_MS / 1000}s)`))
+      }
+    }, BACKEND_STARTUP_TIMEOUT_MS)
 
-    const isDev = !!process.env.VITE_DEV_SERVER_URL
     let cmd: string
     let args: string[]
 
-    if (isDev) {
-      cmd = 'go'
+    if (isDevMode) {
+      cmd = getGoCommand()
       args = ['run', '.']
     } else {
       cmd = getGoExecutablePath()
       args = []
     }
 
-    const cwd = isDev
-      ? path.join(__dirname, '..', 'apps', 'server', 'cmd', 'flow-packet')
-      : undefined
+    const cwd = isDevMode ? getDevBackendDir() : undefined
 
     goProcess = spawn(cmd, args, {
       cwd,
@@ -52,8 +81,12 @@ function startGoBackend(): Promise<number> {
       const match = output.match(/PORT:(\d+)/)
       if (match) {
         const port = parseInt(match[1])
-        clearTimeout(timeout)
-        resolve(port)
+        backendPort = port
+        if (!settled) {
+          settled = true
+          clearTimeout(timeout)
+          resolve(port)
+        }
       }
     })
 
@@ -62,8 +95,11 @@ function startGoBackend(): Promise<number> {
     })
 
     goProcess.on('error', (err) => {
-      clearTimeout(timeout)
-      reject(err)
+      if (!settled) {
+        settled = true
+        clearTimeout(timeout)
+        reject(err)
+      }
     })
 
     goProcess.on('exit', (code) => {
@@ -120,8 +156,8 @@ async function createWindow() {
   })
 
   // 开发模式加载 Vite 开发服务器，生产模式加载打包文件
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+  if (isDevMode) {
+    mainWindow.loadURL(DEV_SERVER_URL)
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
