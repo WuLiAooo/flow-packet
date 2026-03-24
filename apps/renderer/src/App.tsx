@@ -26,15 +26,6 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useCollectionStore } from '@/stores/collectionStore'
 import type { SavedConnection } from '@/stores/savedConnectionStore'
 
-interface DebugInfo {
-  bodyPointerEvents: string
-  bodyOverflow: string
-  bodyScrollLocked: string
-  dialogOverlays: number
-  alertOverlays: number
-  topElement: string
-}
-
 function unlockBodyInteraction() {
   document.body.style.pointerEvents = ''
   document.body.style.overflow = ''
@@ -77,15 +68,6 @@ function App() {
   const setConfig = useConnectionStore((s) => s.setConfig)
   const setRouteFields = useConnectionStore((s) => s.setRouteFields)
   const setTargetAddr = useConnectionStore((s) => s.setTargetAddr)
-  const connState = useConnectionStore((s) => s.state)
-  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
-    bodyPointerEvents: '',
-    bodyOverflow: '',
-    bodyScrollLocked: '',
-    dialogOverlays: 0,
-    alertOverlays: 0,
-    topElement: '',
-  })
 
   const onEmptyDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -138,11 +120,7 @@ function App() {
         }
       }
 
-      setConnectionStatusCallback((connected) => {
-        if (connected) {
-          console.log('[ws] connected to backend')
-        }
-      })
+      setConnectionStatusCallback(() => {})
 
       ;(window as { __BACKEND_PORT__?: number }).__BACKEND_PORT__ = port
       wsConnect(port)
@@ -173,29 +151,6 @@ function App() {
       window.clearTimeout(stopTimer)
     }
   }, [activeConnectionId])
-
-  useEffect(() => {
-    const updateDebugInfo = () => {
-      const centerX = Math.max(0, Math.floor(window.innerWidth / 2))
-      const centerY = Math.max(0, Math.floor(window.innerHeight / 2))
-      const top = document.elementFromPoint(centerX, centerY)
-
-      setDebugInfo({
-        bodyPointerEvents: document.body.style.pointerEvents || '(empty)',
-        bodyOverflow: document.body.style.overflow || '(empty)',
-        bodyScrollLocked: document.body.getAttribute('data-scroll-locked') || '(none)',
-        dialogOverlays: document.querySelectorAll('[data-slot="dialog-overlay"], [data-slot="dialog-portal"]').length,
-        alertOverlays: document.querySelectorAll('[data-slot="alert-dialog-overlay"], [data-slot="alert-dialog-portal"]').length,
-        topElement: top instanceof HTMLElement
-          ? `${top.tagName.toLowerCase()}.${top.className || '(no-class)'}`
-          : '(none)',
-      })
-    }
-
-    updateDebugInfo()
-    const timer = window.setInterval(updateDebugInfo, 300)
-    return () => window.clearInterval(timer)
-  }, [activeConnectionId, connState])
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
     useConnectionStore.getState().setState('disconnected')
@@ -321,15 +276,6 @@ function App() {
               />
             </div>
           </div>
-        </div>
-        <div className="pointer-events-none fixed right-2 bottom-2 z-[9999] max-w-[460px] rounded border bg-background/95 px-3 py-2 font-mono text-[11px] shadow-lg">
-          <div>state: {connState}</div>
-          <div>body.pointerEvents: {debugInfo.bodyPointerEvents}</div>
-          <div>body.overflow: {debugInfo.bodyOverflow}</div>
-          <div>body.scrollLocked: {debugInfo.bodyScrollLocked}</div>
-          <div>dialogOverlays: {debugInfo.dialogOverlays}</div>
-          <div>alertOverlays: {debugInfo.alertOverlays}</div>
-          <div>topAtCenter: {debugInfo.topElement}</div>
         </div>
         <PropertySheet />
         <Toaster position="top-center" richColors />

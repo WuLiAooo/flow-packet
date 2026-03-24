@@ -286,11 +286,9 @@ func registerConnHandlers(srv *api.Server, tcpClient *network.TCPClient, wsClien
 			tcpClient.SetConnectTimeout(connectTimeout)
 		}
 
-		fmt.Printf("[conn.connect] protocol=%s addr=%s timeout=%s parser=%s\n", req.Protocol, addr, connectTimeout, req.ParserMode)
 		if err := (*activeClient).Connect(addr); err != nil {
 			return nil, fmt.Errorf("connect failed: %w", err)
 		}
-		fmt.Printf("[conn.connect] connected addr=%s state=%s\n", addr, (*activeClient).State().String())
 
 		// Pomelo 握手流程
 		if packetCfg.IsPomelo() {
