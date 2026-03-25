@@ -178,7 +178,7 @@ export function ProtoBrowser() {
   return (
     <div className="flex h-full flex-col overflow-hidden px-2.5">
       <div className="flex h-8 shrink-0 items-center justify-between px-2">
-        <span className="text-xs font-medium text-muted-foreground">Request Protocols</span>
+        <span className="text-xs font-medium text-muted-foreground">请求协议</span>
       </div>
 
       <div className="shrink-0" style={{ padding: '12px 8px 6px' }}>
@@ -186,7 +186,7 @@ export function ProtoBrowser() {
       </div>
 
       <div className="mb-2 shrink-0 px-2 text-xs font-medium text-muted-foreground">
-        Cg messages {requestCount > 0 ? `(${requestCount})` : ''}
+        Cg 协议 {requestCount > 0 ? `(${requestCount})` : ''}
       </div>
 
       <div className="shrink-0 rounded-md border border-input shadow-xs" style={{ margin: '0 8px 6px' }}>
@@ -195,7 +195,7 @@ export function ProtoBrowser() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search Cg messages..."
+            placeholder="搜索 Cg 协议..."
             className="h-7 border-0 pl-2 text-xs shadow-none focus-visible:ring-0"
           />
         </div>
@@ -244,7 +244,7 @@ export function ProtoBrowser() {
         ) : (
           <div className="px-3 py-4 text-center">
             <span className="text-xs text-muted-foreground">
-              {requestFiles.length === 0 ? 'No sendable Cg messages found.' : 'No matching Cg messages.'}
+              {requestFiles.length === 0 ? '未找到可发送的 Cg 协议。' : '没有匹配的 Cg 协议。'}
             </span>
           </div>
         )}
@@ -271,12 +271,12 @@ function FileRow({
       onClick={() => {
         if (!lockedOpen) onToggle()
       }}
-    >
-      <ChevronRight className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
-      <File className="size-4 shrink-0" />
-      <span className="truncate text-xs">{file.Path}</span>
-      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{file.Messages.length}</span>
-    </button>
+      >
+        <ChevronRight className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
+        <File className="size-4 shrink-0" />
+        <span className="truncate text-xs">{file.Path}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{file.Messages.length}</span>
+      </button>
   )
 }
 
@@ -397,7 +397,7 @@ function MessageRow({
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Configure Mapping</DialogTitle>
+              <DialogTitle>配置协议映射</DialogTitle>
               <DialogDescription>{message.ShortName}</DialogDescription>
             </DialogHeader>
 
@@ -456,16 +456,16 @@ function MessageRow({
                     >
                       {responseMsg
                         ? responseMessages.find((item) => item.Name === responseMsg)?.ShortName ?? responseMsg
-                        : 'Select Gc message (optional)'}
+                        : '选择 Gc 协议（可选）'}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
                   {responseMsgOpen && (
                     <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
                       <Command>
-                        <CommandInput placeholder="Search Gc messages..." />
+                        <CommandInput placeholder="搜索 Gc 协议..." />
                         <CommandList>
-                          <CommandEmpty>No matching Gc messages</CommandEmpty>
+                          <CommandEmpty>没有匹配的 Gc 协议</CommandEmpty>
                           <CommandGroup>
                             {responseMessages.map((item) => (
                               <CommandItem
@@ -498,11 +498,11 @@ function MessageRow({
               {mapping && (
                 <Button variant="destructive" size="sm" onClick={handleDelete} className="mr-auto">
                   <Trash2 className="mr-1 size-4" />
-                  Delete Mapping
+                  删除映射
                 </Button>
               )}
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleSave}>Save</Button>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
+              <Button onClick={handleSave}>保存</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

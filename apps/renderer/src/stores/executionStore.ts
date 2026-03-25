@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 export type ExecutionStatus = 'idle' | 'running' | 'completed' | 'error' | 'stopped'
+const MAX_LOGS = 50
 
 export interface LogEntry {
   id: string
@@ -36,7 +37,10 @@ export const useExecutionStore = create<ExecutionStore>((set) => ({
   nodeStatuses: {},
 
   setStatus: (status) => set({ status }),
-  addLog: (log) => set((s) => ({ logs: [...s.logs, log] })),
+  addLog: (log) =>
+    set((s) => ({
+      logs: [...s.logs, log].slice(-MAX_LOGS),
+    })),
   clearLogs: () => set({ logs: [] }),
   setNodeStatus: (nodeId, status) =>
     set((s) => ({

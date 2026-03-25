@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react'
-import { ChevronRight, Copy, Check } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { Check, ChevronRight, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useExecutionStore, type LogEntry } from '@/stores/executionStore'
@@ -18,7 +18,7 @@ const typeLabels: Record<string, string> = {
   info: 'INF',
 }
 
-const COLLAPSE_THRESHOLD = 200
+const COLLAPSE_THRESHOLD = 160
 
 export function LogPanel() {
   const logs = useExecutionStore((s) => s.logs)
@@ -26,10 +26,9 @@ export function LogPanel() {
   return (
     <ScrollArea className="h-full">
       <div className="font-mono text-[11px]" style={{ padding: '8px 8px 8px 22px' }}>
+        <div className="mb-2 text-[10px] text-muted-foreground">日志上限 50 条，仅保留最近记录</div>
         {logs.length === 0 && (
-          <div className="text-muted-foreground">
-            等待执行...
-          </div>
+          <div className="text-muted-foreground">等待执行...</div>
         )}
         {logs.map((log) => (
           <LogRow key={log.id} log={log} />
@@ -52,19 +51,16 @@ function LogRow({ log }: { log: LogEntry }) {
   })
 
   const hasData = Object.keys(log.data).length > 0
-  const formatted = useMemo(() => hasData ? formatData(log.data) : '', [log.data, hasData])
-  const isLong = formatted.length > COLLAPSE_THRESHOLD
-  const preview = useMemo(
-    () => isLong ? formatCompact(log.data) : '',
-    [log.data, isLong],
-  )
+  const summary = useMemo(() => summarizeValue(log.data), [log.data])
+  const shouldCollapse = hasData && summary.length > COLLAPSE_THRESHOLD
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(formatted).then(() => {
+    const text = safeStringify(log.data)
+    navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
-  }, [formatted])
+  }, [log.data])
 
   return (
     <div className="py-0.5">
@@ -80,45 +76,84 @@ function LogRow({ log }: { log: LogEntry }) {
         {log.messageName && (
           <span className="text-blue-400">{shortName(log.messageName)}</span>
         )}
-        {isLong && (
+        {hasData && (
           <button
             onClick={() => setExpanded((v) => !v)}
-            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
+            title={expanded ? '收起详情' : '展开详情'}
           >
             <ChevronRight className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
           </button>
         )}
-        {formatted && (
+        {hasData && (
           <button
             onClick={handleCopy}
-            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
             title="复制"
           >
-            {copied
-              ? <Check className="size-3 text-green-500" />
-              : <Copy className="size-3" />}
+            {copied ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
           </button>
         )}
         {log.duration !== undefined && (
-          <span className="text-muted-foreground ml-auto">{log.duration}ms</span>
+          <span className="ml-auto text-muted-foreground">{log.duration}ms</span>
         )}
       </div>
-      {formatted && (
-        isLong ? (
-          expanded ? (
-            <pre className="text-foreground whitespace-pre-wrap break-all mt-0.5" style={{ paddingLeft: 80 }}>
-              {formatted}
-            </pre>
-          ) : (
-            <div className="text-foreground truncate mt-0.5" style={{ paddingLeft: 80 }}>
-              {preview}
-            </div>
-          )
+      {hasData && (
+        expanded ? (
+          <div className="mt-1 pl-20">
+            <JsonTree name="" value={log.data} defaultOpen />
+          </div>
         ) : (
-          <pre className="text-foreground whitespace-pre-wrap break-all mt-0.5" style={{ paddingLeft: 80 }}>
-            {formatted}
-          </pre>
+          <div className={cn('mt-0.5 pl-20 text-foreground', shouldCollapse && 'truncate')}>
+            {summary}
+          </div>
         )
+      )}
+    </div>
+  )
+}
+
+function JsonTree({
+  name,
+  value,
+  defaultOpen = false,
+}: {
+  name: string
+  value: unknown
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  if (!isContainer(value)) {
+    return (
+      <div className="leading-5">
+        {name ? <span className="text-[#7aa2f7]">{name}: </span> : null}
+        <span className="text-foreground">{formatPrimitive(value)}</span>
+      </div>
+    )
+  }
+
+  const entries = Array.isArray(value)
+    ? value.map((item, index) => [String(index), item] as const)
+    : Object.entries(value)
+
+  return (
+    <div className="leading-5">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+        {name ? <span className="text-[#7aa2f7]">{name}</span> : null}
+        <span className="text-muted-foreground">{summarizeContainer(value)}</span>
+      </button>
+      {open && (
+        <div className="ml-4 border-l border-border/60 pl-3">
+          {entries.map(([childName, childValue]) => (
+            <JsonTree key={childName} name={childName} value={childValue} />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -129,18 +164,43 @@ function shortName(fullName: string): string {
   return parts[parts.length - 1]
 }
 
-function formatData(data: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(data, null, 2)
-  } catch {
-    return String(data)
-  }
+function isContainer(value: unknown): value is Record<string, unknown> | unknown[] {
+  return typeof value === 'object' && value !== null
 }
 
-function formatCompact(data: Record<string, unknown>): string {
+function formatPrimitive(value: unknown): string {
+  if (typeof value === 'string') return `"${value}"`
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  return String(value)
+}
+
+function summarizeContainer(value: Record<string, unknown> | unknown[]): string {
+  if (Array.isArray(value)) {
+    return `[${value.length}]`
+  }
+  return `{${Object.keys(value).length}}`
+}
+
+function summarizeValue(value: unknown, depth = 0): string {
+  if (!isContainer(value)) return formatPrimitive(value)
+  if (depth >= 1) return summarizeContainer(value)
+
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 4).map((item) => summarizeValue(item, 1))
+    return `[${items.join(', ')}${value.length > 4 ? ', ...' : ''}]`
+  }
+
+  const parts = Object.entries(value)
+    .slice(0, 6)
+    .map(([key, item]) => `${key}: ${summarizeValue(item, 1)}`)
+  return `{ ${parts.join(', ')}${Object.keys(value).length > 6 ? ', ...' : ''} }`
+}
+
+function safeStringify(value: unknown): string {
   try {
-    return JSON.stringify(data)
+    return JSON.stringify(value, null, 2)
   } catch {
-    return String(data)
+    return String(value)
   }
 }
