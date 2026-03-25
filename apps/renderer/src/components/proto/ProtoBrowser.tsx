@@ -1,21 +1,8 @@
-import { useMemo, useState } from 'react'
-import { ChevronRight, File, Box, Trash2, Search, Check, ChevronsUpDown } from 'lucide-react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Box, Check, ChevronRight, ChevronsUpDown, File, Search, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import {
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from '@/components/ui/sidebar'
 import {
   Dialog,
   DialogContent,
@@ -28,13 +15,33 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useProtoStore, type FileInfo, type MessageInfo } from '@/stores/protoStore'
+import { useProtoStore, type FileInfo, type MessageInfo, type RouteMapping } from '@/stores/protoStore'
 import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { deleteRouteMapping, setRouteMapping } from '@/services/api'
 import { combineRoute, splitRoute } from '@/types/frame'
 import { ProtoImport } from './ProtoImport'
+
+const ROW_HEIGHT = 32
+const OVERSCAN = 12
+
+type RequestFile = FileInfo & { Messages: MessageInfo[] }
+
+type RowItem =
+  | {
+      kind: 'file'
+      key: string
+      file: RequestFile
+      open: boolean
+    }
+  | {
+      kind: 'message'
+      key: string
+      filePath: string
+      message: MessageInfo
+      mapping?: RouteMapping
+    }
 
 function leafName(name: string): string {
   const parts = name.split('.')
@@ -55,7 +62,15 @@ function isGcMessage(message: Pick<MessageInfo, 'Name' | 'ShortName'>): boolean 
 
 export function ProtoBrowser() {
   const files = useProtoStore((s) => s.files)
+  const allMessages = useProtoStore((s) => s.messages)
+  const routeMappings = useProtoStore((s) => s.routeMappings)
+
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
+  const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({})
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
 
   const requestFiles = useMemo(() => {
     return files
@@ -64,18 +79,18 @@ export function ProtoBrowser() {
         if (requestMessages.length === 0) return null
         return { ...file, Messages: requestMessages }
       })
-      .filter(Boolean) as FileInfo[]
+      .filter(Boolean) as RequestFile[]
   }, [files])
 
   const filteredFiles = useMemo(() => {
-    if (!search.trim()) return requestFiles
-    const q = search.toLowerCase()
+    const q = deferredSearch.trim().toLowerCase()
+    if (!q) return requestFiles
 
     return requestFiles
       .map((file) => {
         if (file.Path.toLowerCase().includes(q)) return file
 
-        const matched = (file.Messages ?? []).filter((message) => {
+        const matched = file.Messages.filter((message) => {
           const shortName = messageShortName(message).toLowerCase()
           return shortName.includes(q) || message.Name.toLowerCase().includes(q)
         })
@@ -83,15 +98,82 @@ export function ProtoBrowser() {
         if (matched.length === 0) return null
         return { ...file, Messages: matched }
       })
-      .filter(Boolean) as FileInfo[]
-  }, [requestFiles, search])
+      .filter(Boolean) as RequestFile[]
+  }, [deferredSearch, requestFiles])
 
   const requestCount = useMemo(
-    () => requestFiles.reduce((count, file) => count + (file.Messages?.length ?? 0), 0),
+    () => requestFiles.reduce((count, file) => count + file.Messages.length, 0),
     [requestFiles],
   )
 
-  const isSearching = search.trim().length > 0
+  const routeMappingByRequest = useMemo(() => {
+    const mapping = new Map<string, RouteMapping>()
+    routeMappings.forEach((item) => mapping.set(item.requestMsg, item))
+    return mapping
+  }, [routeMappings])
+
+  const responseMessages = useMemo(
+    () => allMessages.filter(isGcMessage),
+    [allMessages],
+  )
+
+  const isSearching = deferredSearch.trim().length > 0
+
+  const rows = useMemo<RowItem[]>(() => {
+    const nextRows: RowItem[] = []
+
+    filteredFiles.forEach((file) => {
+      const open = isSearching || !!openFiles[file.Path]
+      nextRows.push({
+        kind: 'file',
+        key: `file:${file.Path}`,
+        file,
+        open,
+      })
+
+      if (!open) return
+
+      file.Messages.forEach((message) => {
+        nextRows.push({
+          kind: 'message',
+          key: `message:${message.Name}`,
+          filePath: file.Path,
+          message,
+          mapping: routeMappingByRequest.get(message.Name),
+        })
+      })
+    })
+
+    return nextRows
+  }, [filteredFiles, isSearching, openFiles, routeMappingByRequest])
+
+  const totalHeight = rows.length * ROW_HEIGHT
+  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+  const endIndex = Math.min(
+    rows.length,
+    Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
+  )
+  const visibleRows = rows.slice(startIndex, endIndex)
+
+  useEffect(() => {
+    const element = viewportRef.current
+    if (!element) return
+
+    const updateHeight = () => setViewportHeight(element.clientHeight)
+    updateHeight()
+
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    setScrollTop(0)
+    if (viewportRef.current) {
+      viewportRef.current.scrollTop = 0
+    }
+  }, [deferredSearch])
 
   return (
     <div className="flex h-full flex-col overflow-hidden px-2.5">
@@ -119,78 +201,102 @@ export function ProtoBrowser() {
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-h-full">
-        <SidebarGroup className="pt-0" style={{ padding: '0 8px' }}>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredFiles.map((file) => (
-                <FileNode key={file.Path} file={file} forceOpen={isSearching} />
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+      <div
+        ref={viewportRef}
+        className="flex-1 min-h-0 overflow-auto px-2"
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      >
+        {rows.length > 0 ? (
+          <div style={{ height: totalHeight, position: 'relative' }}>
+            {visibleRows.map((row, index) => {
+              const absoluteIndex = startIndex + index
+              const top = absoluteIndex * ROW_HEIGHT
 
-        {requestFiles.length === 0 && (
+              return (
+                <div
+                  key={row.key}
+                  className="absolute left-0 right-0"
+                  style={{ top, height: ROW_HEIGHT }}
+                >
+                  {row.kind === 'file' ? (
+                    <FileRow
+                      file={row.file}
+                      open={row.open}
+                      lockedOpen={isSearching}
+                      onToggle={() =>
+                        setOpenFiles((current) => ({
+                          ...current,
+                          [row.file.Path]: !row.open,
+                        }))
+                      }
+                    />
+                  ) : (
+                    <MessageRow
+                      message={row.message}
+                      mapping={row.mapping}
+                      responseMessages={responseMessages}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
           <div className="px-3 py-4 text-center">
-            <span className="text-xs text-muted-foreground">No sendable Cg messages found.</span>
+            <span className="text-xs text-muted-foreground">
+              {requestFiles.length === 0 ? 'No sendable Cg messages found.' : 'No matching Cg messages.'}
+            </span>
           </div>
         )}
-
-        {isSearching && filteredFiles.length === 0 && requestFiles.length > 0 && (
-          <div className="px-3 py-4 text-center">
-            <span className="text-xs text-muted-foreground">No matching Cg messages.</span>
-          </div>
-        )}
-      </ScrollArea>
+      </div>
     </div>
   )
 }
 
-function FileNode({ file, forceOpen }: { file: FileInfo; forceOpen?: boolean }) {
-  const [open, setOpen] = useState(false)
-
+function FileRow({
+  file,
+  open,
+  lockedOpen,
+  onToggle,
+}: {
+  file: RequestFile
+  open: boolean
+  lockedOpen: boolean
+  onToggle: () => void
+}) {
   return (
-    <SidebarMenuItem>
-      <Collapsible
-        open={forceOpen ? true : open}
-        onOpenChange={(next) => {
-          if (!forceOpen) setOpen(next)
-        }}
-        className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
-      >
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton>
-            <ChevronRight className="transition-transform" />
-            <File />
-            {file.Path}
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div
-            className="flex flex-col gap-1 border-l border-border py-0.5"
-            style={{ marginLeft: 28, paddingLeft: 16 }}
-          >
-            {file.Messages?.map((message) => (
-              <MessageNode key={message.Name} message={message} />
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </SidebarMenuItem>
+    <button
+      type="button"
+      className="flex h-full w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      onClick={() => {
+        if (!lockedOpen) onToggle()
+      }}
+    >
+      <ChevronRight className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
+      <File className="size-4 shrink-0" />
+      <span className="truncate text-xs">{file.Path}</span>
+      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{file.Messages.length}</span>
+    </button>
   )
 }
 
-function MessageNode({ message }: { message: MessageInfo }) {
+function MessageRow({
+  message,
+  mapping,
+  responseMessages,
+}: {
+  message: MessageInfo
+  mapping?: RouteMapping
+  responseMessages: MessageInfo[]
+}) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [routeValues, setRouteValues] = useState<Record<string, number>>({})
   const [singleRoute, setSingleRoute] = useState('')
   const [responseMsg, setResponseMsg] = useState('')
   const [responseMsgOpen, setResponseMsgOpen] = useState(false)
 
-  const routeMappings = useProtoStore((s) => s.routeMappings)
   const addRouteMapping = useProtoStore((s) => s.addRouteMapping)
   const removeRouteMapping = useProtoStore((s) => s.removeRouteMapping)
-  const allMessages = useProtoStore((s) => s.messages)
   const routeFields = useConnectionStore((s) => s.routeFields)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const getConnection = useSavedConnectionStore((s) => s.getConnection)
@@ -199,25 +305,19 @@ function MessageNode({ message }: { message: MessageInfo }) {
   const isPomelo = activeConnectionId
     ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
     : false
-  const existing = routeMappings.find((mapping) => mapping.requestMsg === message.Name)
   const hasRouteFields = routeFields.length > 0
   const defaultRoute = message.MessageID ?? 0
 
-  const responseMessages = useMemo(
-    () => allMessages.filter(isGcMessage),
-    [allMessages],
-  )
-
   const openDialog = () => {
-    if (existing) {
+    if (mapping) {
       if (isPomelo) {
-        setSingleRoute(existing.stringRoute ?? '')
+        setSingleRoute(mapping.stringRoute ?? '')
       } else if (hasRouteFields) {
-        setRouteValues(splitRoute(existing.route, routeFields))
+        setRouteValues(splitRoute(mapping.route, routeFields))
       } else {
-        setSingleRoute(String(existing.route))
+        setSingleRoute(String(mapping.route))
       }
-      setResponseMsg(existing.responseMsg)
+      setResponseMsg(mapping.responseMsg)
     } else {
       setRouteValues(hasRouteFields && defaultRoute ? splitRoute(defaultRoute, routeFields) : {})
       setSingleRoute(defaultRoute ? String(defaultRoute) : '')
@@ -261,9 +361,9 @@ function MessageNode({ message }: { message: MessageInfo }) {
   }
 
   const handleDelete = async () => {
-    if (!activeConnectionId || !existing) return
-    await deleteRouteMapping(existing.route, activeConnectionId, existing.stringRoute)
-    removeRouteMapping(existing.route, existing.stringRoute)
+    if (!activeConnectionId || !mapping) return
+    await deleteRouteMapping(mapping.route, activeConnectionId, mapping.stringRoute)
+    removeRouteMapping(mapping.route, mapping.stringRoute)
     setDialogOpen(false)
   }
 
@@ -274,23 +374,24 @@ function MessageNode({ message }: { message: MessageInfo }) {
 
   return (
     <>
-      <SidebarMenuButton
-        className="cursor-grab"
+      <button
+        type="button"
+        className="ml-7 flex h-full w-[calc(100%-28px)] cursor-grab items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         draggable
         onDragStart={handleDragStart}
         onDoubleClick={openDialog}
       >
-        <Box className="text-blue-500" />
-        <span className="truncate">{message.ShortName}</span>
-        {(existing || defaultRoute !== 0) && (
+        <Box className="size-4 shrink-0 text-blue-500" />
+        <span className="truncate text-xs">{message.ShortName}</span>
+        {(mapping || defaultRoute !== 0) && (
           <Badge
             variant="secondary"
             className="ml-auto h-4 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
           >
-            {existing?.stringRoute || existing?.route || defaultRoute}
+            {mapping?.stringRoute || mapping?.route || defaultRoute}
           </Badge>
         )}
-      </SidebarMenuButton>
+      </button>
 
       {dialogOpen && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -394,7 +495,7 @@ function MessageNode({ message }: { message: MessageInfo }) {
             </div>
 
             <DialogFooter>
-              {existing && (
+              {mapping && (
                 <Button variant="destructive" size="sm" onClick={handleDelete} className="mr-auto">
                   <Trash2 className="mr-1 size-4" />
                   Delete Mapping
