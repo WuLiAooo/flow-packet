@@ -147,11 +147,7 @@ func (s *flowSession) handleReceive(_ network.Conn, data []byte) {
 		}
 		return
 	}
-	shouldSuppressPacketLog := s.runner.Running() || s.runner.HasActiveObserverWaits()
-	handled := s.runner.HandleIncomingPacket(pkt)
-	if handled && shouldSuppressPacketLog {
-		return
-	}
+	s.runner.HandleIncomingPacket(pkt)
 	emitPacketLogAsync(s.notifyPacket, s.runner, pkt, s.connectionID, s.deviceID, "session")
 }
 

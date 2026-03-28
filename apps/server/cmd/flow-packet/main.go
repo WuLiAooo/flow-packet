@@ -122,11 +122,7 @@ func main() {
 			}
 			return
 		}
-		shouldSuppressPacketLog := runner.Running() || runner.HasActiveObserverWaits()
-		handled := runner.HandleIncomingPacket(pkt)
-		if handled && shouldSuppressPacketLog {
-			return
-		}
+		runner.HandleIncomingPacket(pkt)
 		emitPacketLogAsync(func(payload packetLogPayload) {
 			srv.Broadcast(api.ServerMessage{
 				Event:   "packet.received",

@@ -132,13 +132,6 @@ export function initEventBindings(): () => void {
       }
 
       if (data.response !== undefined) {
-        appendLog({
-          nodeId: data.nodeId,
-          type: 'response',
-          messageName: data.responseMsg,
-          data: data.response ?? {},
-          duration: data.duration,
-        })
         store.setNodeOutput(data.nodeId, {
           messageName: data.responseMsg,
           data: data.response ?? {},
@@ -219,3 +212,4 @@ export function initEventBindings(): () => void {
     unsubs.forEach((unsub) => unsub())
   }
 }
+

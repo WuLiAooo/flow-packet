@@ -829,10 +829,6 @@ func (r *Runner) resetObserverWaits() {
 	r.observerMu.Unlock()
 }
 
-func (r *Runner) HasActiveObserverWaits() bool {
-	return r.hasActiveObserverWaits()
-}
-
 func (r *Runner) hasActiveObserverWaits() bool {
 	r.observerMu.Lock()
 	defer r.observerMu.Unlock()

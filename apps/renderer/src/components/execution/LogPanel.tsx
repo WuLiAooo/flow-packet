@@ -6,9 +6,10 @@
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { Check, ChevronRight, Copy, Search, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, Search, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,12 +31,15 @@ const typeLabels: Record<string, string> = {
 }
 
 const COLLAPSE_THRESHOLD = 160
-const highlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black'
+const highlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors data-[active-search-hit=true]:bg-amber-400 data-[active-search-hit=true]:ring-1 data-[active-search-hit=true]:ring-amber-700'
 
 export function LogPanel() {
   const logs = useExecutionStore((s) => s.logs)
   const clearLogs = useExecutionStore((s) => s.clearLogs)
   const [query, setQuery] = useState('')
+  const [totalMatches, setTotalMatches] = useState(0)
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0)
+  const contentRef = useRef<HTMLDivElement>(null)
   const deferredQuery = useDeferredValue(query.trim().toLowerCase())
 
   const filteredLogs = useMemo(() => {
@@ -43,16 +47,76 @@ export function LogPanel() {
     return logs.filter((log) => matchesLog(log, deferredQuery))
   }, [logs, deferredQuery])
 
-  const firstMatchId = deferredQuery ? filteredLogs[0]?.id ?? null : null
+  const hasSearch = deferredQuery.length > 0
+  const matchLabel = hasSearch
+    ? totalMatches > 0
+      ? `${activeMatchIndex + 1}/${totalMatches}`
+      : '0/0'
+    : '0/0'
+
+  useEffect(() => {
+    if (!hasSearch) {
+      setTotalMatches(0)
+      setActiveMatchIndex(0)
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const hits = getSearchHits(contentRef.current)
+      setTotalMatches(hits.length)
+      setActiveMatchIndex((current) => {
+        if (hits.length === 0) return 0
+        return current >= hits.length ? 0 : current
+      })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [hasSearch, filteredLogs])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const hits = getSearchHits(contentRef.current)
+      hits.forEach((hit, index) => {
+        if (hasSearch && index === activeMatchIndex) {
+          hit.dataset.activeSearchHit = 'true'
+        } else {
+          delete hit.dataset.activeSearchHit
+        }
+      })
+
+      if (!hasSearch || hits.length === 0) return
+      const target = hits[activeMatchIndex] ?? hits[0]
+      target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeMatchIndex, hasSearch, filteredLogs])
+
+  const jumpToMatch = useCallback((direction: 1 | -1) => {
+    if (totalMatches === 0) return
+    setActiveMatchIndex((current) => {
+      const next = current + direction
+      if (next < 0) return totalMatches - 1
+      if (next >= totalMatches) return 0
+      return next
+    })
+  }, [totalMatches])
+
+  const handleSearchKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    jumpToMatch(event.shiftKey ? -1 : 1)
+  }, [jumpToMatch])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2 font-mono text-[11px]">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2 font-mono text-[11px]">
+        <div className="relative min-w-[220px] flex-1 sm:max-w-[66%]">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search logs, messages, payloads"
             className="h-7 pr-7 pl-7 font-mono text-[11px]"
           />
@@ -67,9 +131,28 @@ export function LogPanel() {
             </button>
           )}
         </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
-          {filteredLogs.length}/{logs.length}
-        </span>
+        <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+          <span>{matchLabel}</span>
+          <button
+            type="button"
+            onClick={() => jumpToMatch(-1)}
+            disabled={totalMatches === 0}
+            className="inline-flex items-center rounded border border-border/60 p-1 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            title="Previous match"
+          >
+            <ChevronUp className="size-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => jumpToMatch(1)}
+            disabled={totalMatches === 0}
+            className="inline-flex items-center rounded border border-border/60 p-1 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            title="Next match"
+          >
+            <ChevronDown className="size-3" />
+          </button>
+        </div>
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">Total {logs.length}</span>
         <Button
           type="button"
           variant="ghost"
@@ -82,7 +165,7 @@ export function LogPanel() {
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="font-mono text-[11px]" style={{ padding: '8px 8px 8px 22px' }}>
+        <div ref={contentRef} className="font-mono text-[11px]" style={{ padding: '8px 8px 8px 22px' }}>
           <div className="mb-2 text-[10px] text-muted-foreground">Log buffer keeps the latest 200 entries.</div>
           {logs.length === 0 && (
             <div className="text-muted-foreground">Waiting for execution...</div>
@@ -95,7 +178,6 @@ export function LogPanel() {
               key={log.id}
               log={log}
               searchQuery={deferredQuery}
-              autoFocus={Boolean(firstMatchId && log.id === firstMatchId)}
             />
           ))}
         </div>
@@ -107,15 +189,12 @@ export function LogPanel() {
 function LogRow({
   log,
   searchQuery,
-  autoFocus,
 }: {
   log: LogEntry
   searchQuery: string
-  autoFocus: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
-  const rowRef = useRef<HTMLDivElement>(null)
 
   const time = new Date(log.timestamp).toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -131,14 +210,6 @@ function LogRow({
   const isSearchMode = searchQuery.length > 0
   const isExpanded = expanded || (isSearchMode && hasData)
 
-  useEffect(() => {
-    if (!autoFocus || !isSearchMode) return
-    const frame = window.requestAnimationFrame(() => {
-      const target = rowRef.current?.querySelector('[data-search-hit="true"]') as HTMLElement | null
-      ;(target ?? rowRef.current)?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [autoFocus, isExpanded, isSearchMode])
 
   const handleCopy = useCallback(() => {
     const text = safeStringify(log.data)
@@ -149,7 +220,7 @@ function LogRow({
   }, [log.data])
 
   return (
-    <div ref={rowRef} className="py-0.5">
+    <div className="py-0.5">
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground">{time}</span>
         <span
@@ -257,6 +328,11 @@ function JsonTree({
   )
 }
 
+function getSearchHits(container: HTMLDivElement | null): HTMLElement[] {
+  if (!container) return []
+  return Array.from(container.querySelectorAll('[data-search-hit="true"]'))
+}
+
 function shortName(fullName: string): string {
   const parts = fullName.split('.')
   return parts[parts.length - 1]
@@ -357,3 +433,10 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
+
+
+
+
+
+
+
