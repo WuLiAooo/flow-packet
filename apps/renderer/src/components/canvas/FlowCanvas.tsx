@@ -33,7 +33,7 @@ import { WaitResponseNode } from './nodes/WaitResponseNode'
 import { CommentNode } from './nodes/CommentNode'
 import { ExecEdge } from './edges/ExecEdge'
 import { CanvasControls } from './CanvasControls'
-import { loginDeviceSession } from '@/services/api'
+import { loginDeviceSession, logoutDeviceSession } from '@/services/api'
 
 const nodeTypes: NodeTypes = {
   beginNode: BeginNode,
@@ -74,6 +74,7 @@ export function FlowCanvas() {
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const connState = useConnectionStore((s) => s.state)
   const clearSessionStatus = useSessionStatusStore((s) => s.clearStatus)
+  const getSessionStatus = useSessionStatusStore((s) => s.getStatus)
   const theme = useTheme((s) => s.theme)
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useRef<ReactFlowInstance<Node<AnyNodeData>> | null>(null)
@@ -220,6 +221,35 @@ export function FlowCanvas() {
     }
   }, [activeConnectionId, clearSessionStatus, connState, nodeMenu, nodes])
 
+  const handleBeginLogout = useCallback(async () => {
+    if (!nodeMenu || nodeMenu.nodeType !== 'beginNode') return
+    if (!activeConnectionId) {
+      setNodeMenu(null)
+      toast.error('No active connection')
+      return
+    }
+
+    const beginNode = nodes.find((node) => node.id === nodeMenu.nodeId && node.type === 'beginNode')
+    const deviceId = typeof beginNode?.data?.deviceId === 'string' ? beginNode.data.deviceId.trim() : ''
+    if (!deviceId) {
+      setNodeMenu(null)
+      toast.error('Begin deviceId required')
+      return
+    }
+
+    try {
+      await logoutDeviceSession(activeConnectionId, deviceId)
+      toast.success('Begin session logged out', {
+        description: `deviceId: ${deviceId}`,
+      })
+    } catch (err) {
+      toast.error('Begin logout failed', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setNodeMenu(null)
+    }
+  }, [activeConnectionId, nodeMenu, nodes])
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       useCanvasStore.getState().setEditingNodeId(node.id)
@@ -369,6 +399,15 @@ export function FlowCanvas() {
     }
   }, [nodeMenu])
 
+  const beginMenuNode = nodeMenu?.nodeType === 'beginNode'
+    ? nodes.find((node) => node.id === nodeMenu.nodeId && node.type === 'beginNode')
+    : undefined
+  const beginMenuDeviceId = typeof beginMenuNode?.data?.deviceId === 'string' ? beginMenuNode.data.deviceId.trim() : ''
+  const beginMenuSessionState = activeConnectionId && beginMenuDeviceId
+    ? getSessionStatus(activeConnectionId, beginMenuDeviceId)?.state
+    : undefined
+  const beginMenuActionLabel = beginMenuSessionState === 'ready' ? 'Logout' : 'Login'
+
   let previewRect: { left: number; top: number; width: number; height: number } | null = null
   if (drawingComment && drawStart && drawCurrent) {
     const instance = reactFlowInstance.current
@@ -455,9 +494,9 @@ export function FlowCanvas() {
             <Button
               variant="ghost"
               className="h-8 w-full justify-start px-2 text-sm"
-              onClick={() => void handleBeginLogin()}
+              onClick={() => void (beginMenuSessionState === 'ready' ? handleBeginLogout() : handleBeginLogin())}
             >
-              Login
+              {beginMenuActionLabel}
             </Button>
           )}
         </div>
@@ -477,4 +516,10 @@ export function FlowCanvas() {
     </div>
   )
 }
+
+
+
+
+
+
 

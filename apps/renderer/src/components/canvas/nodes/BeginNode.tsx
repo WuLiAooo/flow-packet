@@ -47,10 +47,14 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
       : undefined
   ))
 
+  const normalizedSessionState = sessionStatus?.state === 'disconnected' && connectionState === 'connected'
+    ? 'need_login'
+    : sessionStatus?.state
+
   const stateKey = !deviceId
     ? 'not_configured'
-    : sessionStatus?.state
-      ? sessionStatus.state
+    : normalizedSessionState
+      ? normalizedSessionState
       : connectionState === 'connected'
         ? 'need_login'
         : connectionState
@@ -111,3 +115,4 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
     </Card>
   )
 }
+

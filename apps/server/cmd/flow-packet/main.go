@@ -323,6 +323,25 @@ func registerFlowHandlers(srv *api.Server, legacyRunner *engine.Runner, state *a
 		return map[string]string{"status": "ready"}, nil
 	})
 
+	srv.Handle("session.logout", func(payload json.RawMessage) (any, error) {
+		var req struct {
+			ConnectionID string `json:"connectionId"`
+			DeviceID     string `json:"deviceId"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+		req.DeviceID = strings.TrimSpace(req.DeviceID)
+		if req.ConnectionID == "" || req.DeviceID == "" {
+			return nil, fmt.Errorf("connectionId and deviceId are required")
+		}
+
+		if err := sessionManager.LogoutSession(req.ConnectionID, req.DeviceID); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "disconnected"}, nil
+	})
+
 	srv.Handle("flow.execute", func(payload json.RawMessage) (any, error) {
 		var req struct {
 			ConnectionID string            `json:"connectionId"`

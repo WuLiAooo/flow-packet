@@ -138,6 +138,9 @@ export async function loginDeviceSession(connectionId: string, deviceId: string)
   return sendRequest('session.login', { connectionId, deviceId })
 }
 
+export async function logoutDeviceSession(connectionId: string, deviceId: string) {
+  return sendRequest('session.logout', { connectionId, deviceId })
+}
 export async function executeFlow(nodes: unknown[], edges: unknown[], connectionId: string, deviceId?: string) {
   return sendRequest('flow.execute', { nodes, edges, connectionId, deviceId })
 }
@@ -145,6 +148,8 @@ export async function executeFlow(nodes: unknown[], edges: unknown[], connection
 export async function stopFlow() {
   return sendRequest('flow.stop')
 }
+
+
 
 
 

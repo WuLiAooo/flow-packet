@@ -17,6 +17,7 @@ import (
 const (
 	loginMessageShortName     = "CgLogIn"
 	enterGameMessageShortName = "CgEnterGame"
+	closeMessageShortName     = "CgClose"
 	synchronizeTimeShortName  = "CgSynchronizeTime"
 	loginTypeValue            = "test"
 	sessionSeqBase            = uint32(32747)
@@ -70,6 +71,7 @@ type flowSession struct {
 	pomeloHandshakeCh chan []byte
 	loginPlan         *loginMessagePlan
 	enterGamePlan     *loginMessagePlan
+	closePlan         *syncMessagePlan
 	syncPlan          *syncMessagePlan
 	syncStopCh        chan struct{}
 	state             string
@@ -79,7 +81,7 @@ type flowSession struct {
 	notifyPacket      func(payload packetLogPayload)
 }
 
-func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *loginMessagePlan, enterGamePlan *loginMessagePlan, syncPlan *syncMessagePlan, notifyStatus func(payload sessionStatusPayload), notifyPacket func(payload packetLogPayload)) *flowSession {
+func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *loginMessagePlan, enterGamePlan *loginMessagePlan, closePlan *syncMessagePlan, syncPlan *syncMessagePlan, notifyStatus func(payload sessionStatusPayload), notifyPacket func(payload packetLogPayload)) *flowSession {
 	// TopHero business sessions use CgSynchronizeTime as the app-level heartbeat.
 	// Disable raw transport heartbeat here to avoid sending heartbeat frames the server may not expect.
 	if syncPlan != nil {
@@ -101,6 +103,7 @@ func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *
 		pomeloHandshakeCh: make(chan []byte, 1),
 		loginPlan:         loginPlan,
 		enterGamePlan:     enterGamePlan,
+		closePlan:         closePlan,
 		syncPlan:          syncPlan,
 		state:             "disconnected",
 		notifyStatus:      notifyStatus,
@@ -280,6 +283,16 @@ func (s *flowSession) ensureLoggedIn() error {
 	return nil
 }
 
+func (s *flowSession) logout() error {
+	if err := s.sendClose(); err != nil {
+		s.setState("error", err.Error())
+		return fmt.Errorf("send close %s: %w", s.deviceID, err)
+	}
+
+	s.close()
+	return nil
+}
+
 func (s *flowSession) close() {
 	s.stopSyncLoop()
 	s.runner.Stop()
@@ -325,6 +338,29 @@ func (s *flowSession) sendEnterGame() error {
 	}
 
 	return nil
+}
+
+func (s *flowSession) sendClose() error {
+	if s.closePlan == nil {
+		return fmt.Errorf("close message plan is not configured")
+	}
+
+	payload, err := s.closePlan.Encode()
+	if err != nil {
+		return err
+	}
+
+	frame, err := codec.Encode(&codec.Packet{
+		Route:       s.closePlan.Route,
+		StringRoute: s.closePlan.StringRoute,
+		Seq:         s.runner.SeqCtx().NextSeqValue(),
+		Data:        payload,
+	}, s.config.PacketConfig)
+	if err != nil {
+		return err
+	}
+
+	return s.client.Send(frame)
 }
 
 func (s *flowSession) sendSynchronizeTime() error {
@@ -513,12 +549,17 @@ func (m *flowSessionManager) EnsureSession(connectionID string, deviceID string,
 		return nil, err
 	}
 
+	closePlan, err := buildCloseMessagePlan(cs, config.ThriftProtocol)
+	if err != nil {
+		return nil, err
+	}
+
 	syncPlan, err := buildSynchronizeTimePlan(cs, config.ThriftProtocol)
 	if err != nil {
 		return nil, err
 	}
 
-	session = newFlowSession(config, deviceID, loginPlan, enterGamePlan, syncPlan, m.notifyStatus, m.notifyPacket)
+	session = newFlowSession(config, deviceID, loginPlan, enterGamePlan, closePlan, syncPlan, m.notifyStatus, m.notifyPacket)
 	if err := configureRunnerForConnState(session.runner, cs); err != nil {
 		session.close()
 		return nil, err
@@ -541,6 +582,27 @@ func (m *flowSessionManager) GetSession(connectionID string, deviceID string) *f
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessions[key]
+}
+
+func (m *flowSessionManager) LogoutSession(connectionID string, deviceID string) error {
+	key := makeSessionKey(connectionID, deviceID)
+	m.mu.RLock()
+	session := m.sessions[key]
+	m.mu.RUnlock()
+	if session == nil {
+		return fmt.Errorf("business session for deviceId %s is not logged in", deviceID)
+	}
+
+	if err := session.logout(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	if m.sessions[key] == session {
+		delete(m.sessions, key)
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *flowSessionManager) removeConnectionSessions(connectionID string) []*flowSession {
@@ -744,6 +806,59 @@ func buildEnterGameMessagePlan(cs *api.ConnState, thriftProtocol string) (*login
 				return codec.DynamicEncode(descriptor, map[string]any{})
 			},
 			Decode: decodeFn,
+		}, nil
+	default:
+		return nil, fmt.Errorf("no schema imported for connection")
+	}
+}
+
+func buildCloseMessagePlan(cs *api.ConnState, thriftProtocol string) (*syncMessagePlan, error) {
+	switch {
+	case cs.ThriftResult != nil:
+		message, ok := findMessageByShortName(cs.ThriftResult.AllMessages(), closeMessageShortName)
+		if !ok {
+			return nil, fmt.Errorf("message %s not found", closeMessageShortName)
+		}
+		route, stringRoute, err := resolveMessageRoute(cs, message.Name, message.MessageID)
+		if err != nil {
+			return nil, err
+		}
+		descriptor := cs.ThriftResult.FindMessageDescriptor(message.Name)
+		if descriptor == nil {
+			return nil, fmt.Errorf("message descriptor %s not found", message.Name)
+		}
+		return &syncMessagePlan{
+			MessageName: message.Name,
+			Route:       route,
+			StringRoute: stringRoute,
+			Encode: func() ([]byte, error) {
+				if thriftProtocol == "compact" {
+					return codec.DynamicThriftCompactEncode(descriptor, map[string]any{})
+				}
+				return codec.DynamicThriftEncode(descriptor, map[string]any{})
+			},
+		}, nil
+
+	case cs.ParseResult != nil:
+		message, ok := findMessageByShortName(cs.ParseResult.AllMessages(), closeMessageShortName)
+		if !ok {
+			return nil, fmt.Errorf("message %s not found", closeMessageShortName)
+		}
+		route, stringRoute, err := resolveMessageRoute(cs, message.Name, message.MessageID)
+		if err != nil {
+			return nil, err
+		}
+		descriptor := cs.ParseResult.FindMessageDescriptor(message.Name)
+		if descriptor == nil {
+			return nil, fmt.Errorf("message descriptor %s not found", message.Name)
+		}
+		return &syncMessagePlan{
+			MessageName: message.Name,
+			Route:       route,
+			StringRoute: stringRoute,
+			Encode: func() ([]byte, error) {
+				return codec.DynamicEncode(descriptor, map[string]any{})
+			},
 		}, nil
 	default:
 		return nil, fmt.Errorf("no schema imported for connection")
