@@ -20,6 +20,7 @@ interface TabStore {
   openTab: (name: string, collectionId: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => void
   switchTab: (tabId: string) => void
   closeTab: (tabId: string) => void
+  renameTab: (tabId: string, name: string) => void
   markClean: (tabId: string) => void
   setCollectionId: (tabId: string, collectionId: string) => void
   _saveActiveTab: () => void
@@ -57,6 +58,16 @@ export const useTabStore = create<TabStore>((set, get) => ({
           : t,
       ),
     })
+  },
+
+  renameTab: (tabId, name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === tabId ? { ...t, name: trimmed, dirty: true } : t,
+      ),
+    }))
   },
 
   markClean: (tabId) => {
