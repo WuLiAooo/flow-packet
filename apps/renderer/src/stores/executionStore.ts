@@ -19,22 +19,33 @@ export interface NodeStatus {
   error?: string
 }
 
+export interface NodeOutput {
+  messageName?: string
+  data: Record<string, unknown>
+  duration?: number
+  timestamp: number
+}
+
 interface ExecutionStore {
   status: ExecutionStatus
   logs: LogEntry[]
   nodeStatuses: Record<string, NodeStatus>
+  nodeOutputs: Record<string, NodeOutput>
 
   setStatus: (status: ExecutionStatus) => void
   addLog: (log: LogEntry) => void
   clearLogs: () => void
   setNodeStatus: (nodeId: string, status: NodeStatus) => void
   resetNodeStatuses: () => void
+  setNodeOutput: (nodeId: string, output: NodeOutput) => void
+  clearNodeOutputs: () => void
 }
 
 export const useExecutionStore = create<ExecutionStore>((set) => ({
   status: 'idle',
   logs: [],
   nodeStatuses: {},
+  nodeOutputs: {},
 
   setStatus: (status) => set({ status }),
   addLog: (log) =>
@@ -47,4 +58,9 @@ export const useExecutionStore = create<ExecutionStore>((set) => ({
       nodeStatuses: { ...s.nodeStatuses, [nodeId]: status },
     })),
   resetNodeStatuses: () => set({ nodeStatuses: {} }),
+  setNodeOutput: (nodeId, output) =>
+    set((s) => ({
+      nodeOutputs: { ...s.nodeOutputs, [nodeId]: output },
+    })),
+  clearNodeOutputs: () => set({ nodeOutputs: {} }),
 }))

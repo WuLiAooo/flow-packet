@@ -260,6 +260,18 @@ func flattenMessages(msgs []MessageInfo) []MessageInfo {
 	return result
 }
 
+func (r *ParseResult) FindMessageNameByID(id uint32) string {
+	if id == 0 {
+		return ""
+	}
+	for _, message := range r.AllMessages() {
+		if message.MessageID == id {
+			return message.Name
+		}
+	}
+	return ""
+}
+
 func collectImportPaths(paths []string) []string {
 	dirs := make(map[string]bool)
 	for _, p := range paths {

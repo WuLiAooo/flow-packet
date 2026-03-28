@@ -94,7 +94,9 @@ func main() {
 		}
 		// 先精确匹配 seq; 若服务端不回传 seq(seq=0), 回退到匹配最早的等待请求
 		if !runner.SeqCtx().Resolve(pkt.Seq, pkt.Data) {
-			runner.SeqCtx().ResolveFirst(pkt.Data)
+			if !runner.SeqCtx().ResolveFirst(pkt.Data) {
+				runner.PushIncomingPacket(pkt)
+			}
 		}
 	}
 
@@ -397,14 +399,18 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 
 		runner.SetResponseNameResolver(func(route uint32) string {
 			key := fmt.Sprintf("%d", route)
-			mapping, ok := cs.RouteMappings[key]
-			if !ok {
-				if cs.ThriftResult != nil {
-					return cs.ThriftResult.FindMessageNameByID(route)
-				}
-				return ""
+			if mapping, ok := cs.RouteMappings[key]; ok && mapping.ResponseMsg != "" {
+				return mapping.ResponseMsg
 			}
-			return mapping.ResponseMsg
+			if cs.ParseResult != nil {
+				if messageName := cs.ParseResult.FindMessageNameByID(route); messageName != "" {
+					return messageName
+				}
+			}
+			if cs.ThriftResult != nil {
+				return cs.ThriftResult.FindMessageNameByID(route)
+			}
+			return ""
 		})
 
 		runner.SetStringRouteResponseNameResolver(func(route string) string {
@@ -413,6 +419,28 @@ func registerFlowHandlers(srv *api.Server, runner *engine.Runner, state *api.App
 				return ""
 			}
 			return mapping.ResponseMsg
+		})
+
+		runner.SetIncomingMessageNameResolver(func(route uint32, stringRoute string) string {
+			if stringRoute != "" {
+				if mapping, ok := cs.RouteMappings[stringRoute]; ok && mapping.ResponseMsg != "" {
+					return mapping.ResponseMsg
+				}
+			}
+			if cs.ParseResult != nil {
+				if messageName := cs.ParseResult.FindMessageNameByID(route); messageName != "" {
+					return messageName
+				}
+			}
+			if cs.ThriftResult != nil {
+				if messageName := cs.ThriftResult.FindMessageNameByID(route); messageName != "" {
+					return messageName
+				}
+			}
+			if mapping, ok := cs.RouteMappings[fmt.Sprintf("%d", route)]; ok {
+				return mapping.ResponseMsg
+			}
+			return ""
 		})
 
 		go func() {

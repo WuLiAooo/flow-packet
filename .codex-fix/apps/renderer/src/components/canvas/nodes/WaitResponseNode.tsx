@@ -1,8 +1,8 @@
 ﻿import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { Box } from 'lucide-react'
+import { Inbox } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
-import type { RequestNodeData } from '@/stores/canvasStore'
+import type { WaitResponseNodeData } from '@/stores/canvasStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { NodeRuntimePreview } from './NodeRuntimePreview'
 
@@ -21,7 +21,7 @@ function getPinColor(type: string): string {
   return pinColors[type] || 'var(--pin-message)'
 }
 
-export function RequestNode({ id, data, selected }: NodeProps<Node<RequestNodeData>>) {
+export function WaitResponseNode({ id, data, selected }: NodeProps<Node<WaitResponseNodeData>>) {
   const nodeStatus = useExecutionStore((s) => s.nodeStatuses[id])
   const shortName = data.messageName.split('.').pop() || data.messageName
 
@@ -47,7 +47,7 @@ export function RequestNode({ id, data, selected }: NodeProps<Node<RequestNodeDa
       }}
     >
       <div
-        className="rounded-t-md bg-primary/20"
+        className="rounded-t-md bg-emerald-500/15"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -67,8 +67,11 @@ export function RequestNode({ id, data, selected }: NodeProps<Node<RequestNodeDa
           }}
         />
 
-        <Box className="size-3.5 shrink-0 text-primary" />
-        <span className="w-full truncate py-[2px] text-sm font-bold text-primary">{shortName}</span>
+        <Inbox className="size-3.5 shrink-0 text-emerald-600" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold text-emerald-700">{shortName}</div>
+          <div className="truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Wait Gc</div>
+        </div>
 
         <div
           style={{
@@ -83,7 +86,7 @@ export function RequestNode({ id, data, selected }: NodeProps<Node<RequestNodeDa
       </div>
 
       <CardContent className="mt-0 p-0">
-        {data.responseFields?.slice(0, 10).map((field) => (
+        {data.expectedFields?.slice(0, 10).map((field) => (
           <div
             key={field.name}
             className="group relative flex h-8 items-center justify-between gap-1 px-2 transition-all duration-200 ease-in-out hover:bg-secondary"
@@ -103,14 +106,14 @@ export function RequestNode({ id, data, selected }: NodeProps<Node<RequestNodeDa
             <span className="shrink-0 text-xs text-muted-foreground">{field.type}</span>
           </div>
         ))}
-        {(!data.responseFields || data.responseFields.length === 0) && (
+        {(!data.expectedFields || data.expectedFields.length === 0) && (
           <div className="flex h-8 items-center px-2">
-            <span className="text-xs text-muted-foreground">No field definitions</span>
+            <span className="text-xs text-muted-foreground">Waiting message, no field definitions</span>
           </div>
         )}
-        {data.responseFields && data.responseFields.length > 10 && (
+        {data.expectedFields && data.expectedFields.length > 10 && (
           <div className="flex h-8 items-center justify-center">
-            <span className="text-xs text-muted-foreground">+{data.responseFields.length - 10} more fields</span>
+            <span className="text-xs text-muted-foreground">+{data.expectedFields.length - 10} more fields</span>
           </div>
         )}
       </CardContent>

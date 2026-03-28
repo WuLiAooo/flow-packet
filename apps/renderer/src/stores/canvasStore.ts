@@ -10,13 +10,21 @@ export interface RequestNodeData {
   [key: string]: unknown
 }
 
+export interface WaitResponseNodeData {
+  messageName: string
+  route: number
+  stringRoute?: string
+  expectedFields?: { name: string; type: string }[]
+  [key: string]: unknown
+}
+
 export interface CommentNodeData {
   label: string
   color: string
   [key: string]: unknown
 }
 
-export type AnyNodeData = RequestNodeData | CommentNodeData
+export type AnyNodeData = RequestNodeData | WaitResponseNodeData | CommentNodeData
 
 interface Snapshot {
   nodes: Node<AnyNodeData>[]

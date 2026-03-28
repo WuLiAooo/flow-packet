@@ -5,7 +5,6 @@ import { useExecutionStore } from '@/stores/executionStore'
 export function initEventBindings(): () => void {
   const unsubs: (() => void)[] = []
 
-  // conn.status → connectionStore
   unsubs.push(
     subscribe('conn.status', (payload) => {
       const data = payload as { state: string; addr?: string }
@@ -21,7 +20,6 @@ export function initEventBindings(): () => void {
     })
   )
 
-  // node.result → executionStore
   unsubs.push(
     subscribe('node.result', (payload) => {
       const data = payload as {
@@ -39,28 +37,37 @@ export function initEventBindings(): () => void {
         status: 'success',
       })
 
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        nodeId: data.nodeId,
-        type: 'request',
-        messageName: data.requestMsg,
-        data: data.request ?? {},
-      })
+      if (data.requestMsg || data.request) {
+        store.addLog({
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          nodeId: data.nodeId,
+          type: 'request',
+          messageName: data.requestMsg,
+          data: data.request ?? {},
+        })
+      }
 
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        nodeId: data.nodeId,
-        type: 'response',
-        messageName: data.responseMsg,
-        data: data.response ?? {},
-        duration: data.duration,
-      })
+      if (data.response !== undefined) {
+        store.addLog({
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          nodeId: data.nodeId,
+          type: 'response',
+          messageName: data.responseMsg,
+          data: data.response ?? {},
+          duration: data.duration,
+        })
+        store.setNodeOutput(data.nodeId, {
+          messageName: data.responseMsg,
+          data: data.response ?? {},
+          duration: data.duration,
+          timestamp: Date.now(),
+        })
+      }
     })
   )
 
-  // node.error → executionStore
   unsubs.push(
     subscribe('node.error', (payload) => {
       const data = payload as { nodeId: string; error: string }
@@ -82,7 +89,6 @@ export function initEventBindings(): () => void {
     })
   )
 
-  // node.start → executionStore (running status)
   unsubs.push(
     subscribe('node.start', (payload) => {
       const data = payload as { nodeId: string }
@@ -103,24 +109,22 @@ export function initEventBindings(): () => void {
     })
   )
 
-  // flow.complete → executionStore
   unsubs.push(
     subscribe('flow.complete', () => {
       useExecutionStore.getState().setStatus('completed')
     })
   )
 
-  // flow.started → executionStore
   unsubs.push(
     subscribe('flow.started', () => {
       const store = useExecutionStore.getState()
       store.setStatus('running')
       store.clearLogs()
       store.resetNodeStatuses()
+      store.clearNodeOutputs()
     })
   )
 
-  // flow.error → executionStore
   unsubs.push(
     subscribe('flow.error', (payload) => {
       const data = payload as { error: string }

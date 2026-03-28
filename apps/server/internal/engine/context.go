@@ -1,26 +1,27 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 )
 
-// SeqContext seq 分配与响应匹配
+// SeqContext seq ��������Ӧƥ��
 type SeqContext struct {
 	mu      sync.Mutex
 	counter uint32
 	pending map[uint32]chan []byte
 }
 
-// NewSeqContext 创建 seq 上下文
+// NewSeqContext ���� seq ������
 func NewSeqContext() *SeqContext {
 	return &SeqContext{
 		pending: make(map[uint32]chan []byte),
 	}
 }
 
-// NextSeq 分配下一个 seq 并注册等待通道
+// NextSeq ������һ�� seq ��ע��ȴ�ͨ��
 func (c *SeqContext) NextSeq() (uint32, chan []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -32,7 +33,16 @@ func (c *SeqContext) NextSeq() (uint32, chan []byte) {
 	return seq, ch
 }
 
-// Resolve 收到响应后, 通过 seq 匹配到等待方
+// NextSeqValue allocates the next sequence without waiting for a response.
+func (c *SeqContext) NextSeqValue() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.counter++
+	return c.counter
+}
+
+// Resolve �յ���Ӧ��, ͨ�� seq ƥ�䵽�ȴ���
 func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	c.mu.Lock()
 	ch, ok := c.pending[seq]
@@ -49,8 +59,8 @@ func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	return true
 }
 
-// ResolveFirst 当 seq 无法精确匹配时, 解析最早的等待请求
-// 适用于服务端不回传 seq 的协议(响应 seq=0)
+// ResolveFirst �� seq �޷���ȷƥ��ʱ, ��������ĵȴ�����
+// �����ڷ���˲��ش� seq ��Э��(��Ӧ seq=0)
 func (c *SeqContext) ResolveFirst(data []byte) bool {
 	c.mu.Lock()
 	var minSeq uint32
@@ -74,17 +84,27 @@ func (c *SeqContext) ResolveFirst(data []byte) bool {
 	return true
 }
 
-// WaitResponse 等待指定 seq 的响应, 超时返回错误
+// WaitResponse �ȴ�ָ�� seq ����Ӧ, ��ʱ���ش���
 func (c *SeqContext) WaitResponse(ch chan []byte, timeout time.Duration) ([]byte, error) {
+	return c.WaitResponseContext(context.Background(), ch, timeout)
+}
+
+// WaitResponseContext waits for a response until timeout or cancellation.
+func (c *SeqContext) WaitResponseContext(ctx context.Context, ch chan []byte, timeout time.Duration) ([]byte, error) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case data := <-ch:
 		return data, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, fmt.Errorf("response timeout")
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
-// Reset 重置上下文
+// Reset ����������
 func (c *SeqContext) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

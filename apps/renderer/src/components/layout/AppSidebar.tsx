@@ -13,6 +13,11 @@ const navItems: { icon: typeof LayoutDashboard; label: SidebarTab }[] = [
   { icon: Library, label: '集合' }
 ]
 
+export const SIDEBAR_TABS = {
+  canvas: navItems[0].label,
+  collection: navItems[1].label,
+} as const
+
 export function AppSidebar({
   activeTab,
   onTabChange,
