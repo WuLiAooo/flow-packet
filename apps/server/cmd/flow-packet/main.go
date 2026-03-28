@@ -122,13 +122,17 @@ func main() {
 			}
 			return
 		}
+		shouldSuppressPacketLog := runner.Running() || runner.HasActiveObserverWaits()
+		handled := runner.HandleIncomingPacket(pkt)
+		if handled && shouldSuppressPacketLog {
+			return
+		}
 		emitPacketLogAsync(func(payload packetLogPayload) {
 			srv.Broadcast(api.ServerMessage{
 				Event:   "packet.received",
 				Payload: payload,
 			})
 		}, runner, pkt, activeConnectionID, "", "connection")
-		runner.HandleIncomingPacket(pkt)
 	}
 
 	onConnect := func(conn network.Conn) {

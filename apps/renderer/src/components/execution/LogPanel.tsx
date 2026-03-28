@@ -1,4 +1,13 @@
-﻿import { useCallback, useDeferredValue, useMemo, useState } from 'react'
+﻿import {
+  Fragment,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { Check, ChevronRight, Copy, Search, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -21,6 +30,7 @@ const typeLabels: Record<string, string> = {
 }
 
 const COLLAPSE_THRESHOLD = 160
+const highlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black'
 
 export function LogPanel() {
   const logs = useExecutionStore((s) => s.logs)
@@ -32,6 +42,8 @@ export function LogPanel() {
     if (!deferredQuery) return logs
     return logs.filter((log) => matchesLog(log, deferredQuery))
   }, [logs, deferredQuery])
+
+  const firstMatchId = deferredQuery ? filteredLogs[0]?.id ?? null : null
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -79,7 +91,12 @@ export function LogPanel() {
             <div className="text-muted-foreground">No logs match the current search.</div>
           )}
           {filteredLogs.map((log) => (
-            <LogRow key={log.id} log={log} />
+            <LogRow
+              key={log.id}
+              log={log}
+              searchQuery={deferredQuery}
+              autoFocus={Boolean(firstMatchId && log.id === firstMatchId)}
+            />
           ))}
         </div>
       </ScrollArea>
@@ -87,9 +104,18 @@ export function LogPanel() {
   )
 }
 
-function LogRow({ log }: { log: LogEntry }) {
+function LogRow({
+  log,
+  searchQuery,
+  autoFocus,
+}: {
+  log: LogEntry
+  searchQuery: string
+  autoFocus: boolean
+}) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
 
   const time = new Date(log.timestamp).toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -102,6 +128,17 @@ function LogRow({ log }: { log: LogEntry }) {
   const hasData = Object.keys(log.data).length > 0
   const summary = useMemo(() => summarizeValue(log.data), [log.data])
   const shouldCollapse = hasData && summary.length > COLLAPSE_THRESHOLD
+  const isSearchMode = searchQuery.length > 0
+  const isExpanded = expanded || (isSearchMode && hasData)
+
+  useEffect(() => {
+    if (!autoFocus || !isSearchMode) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = rowRef.current?.querySelector('[data-search-hit="true"]') as HTMLElement | null
+      ;(target ?? rowRef.current)?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [autoFocus, isExpanded, isSearchMode])
 
   const handleCopy = useCallback(() => {
     const text = safeStringify(log.data)
@@ -112,7 +149,7 @@ function LogRow({ log }: { log: LogEntry }) {
   }, [log.data])
 
   return (
-    <div className="py-0.5">
+    <div ref={rowRef} className="py-0.5">
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground">{time}</span>
         <span
@@ -121,17 +158,23 @@ function LogRow({ log }: { log: LogEntry }) {
         >
           {typeLabels[log.type]}
         </span>
-        <span className="text-muted-foreground">[{log.nodeId}]</span>
+        <span className="text-muted-foreground">
+          [
+          {highlightText(log.nodeId, searchQuery)}
+          ]
+        </span>
         {log.messageName && (
-          <span className="text-blue-400">{shortName(log.messageName)}</span>
+          <span className="text-blue-400">{highlightText(shortName(log.messageName), searchQuery)}</span>
         )}
         {hasData && (
           <button
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => {
+              if (!isSearchMode) setExpanded((value) => !value)
+            }}
             className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
-            title={expanded ? 'Collapse details' : 'Expand details'}
+            title={isExpanded ? 'Collapse details' : 'Expand details'}
           >
-            <ChevronRight className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
+            <ChevronRight className={cn('size-3 transition-transform', isExpanded && 'rotate-90')} />
           </button>
         )}
         {hasData && (
@@ -148,13 +191,13 @@ function LogRow({ log }: { log: LogEntry }) {
         )}
       </div>
       {hasData && (
-        expanded ? (
+        isExpanded ? (
           <div className="mt-1 pl-20">
-            <JsonTree name="" value={log.data} defaultOpen />
+            <JsonTree name="" value={log.data} defaultOpen searchQuery={searchQuery} />
           </div>
         ) : (
           <div className={cn('mt-0.5 pl-20 text-foreground', shouldCollapse && 'truncate')}>
-            {summary}
+            {highlightText(summary, searchQuery)}
           </div>
         )
       )}
@@ -166,18 +209,22 @@ function JsonTree({
   name,
   value,
   defaultOpen = false,
+  searchQuery,
 }: {
   name: string
   value: unknown
   defaultOpen?: boolean
+  searchQuery: string
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const forceOpen = searchQuery.length > 0 && treeContainsMatch(name, value, searchQuery)
+  const isOpen = open || forceOpen
 
   if (!isContainer(value)) {
     return (
       <div className="leading-5">
-        {name ? <span className="text-[#7aa2f7]">{name}: </span> : null}
-        <span className="text-foreground">{formatPrimitive(value)}</span>
+        {name ? <span className="text-[#7aa2f7]">{highlightText(name, searchQuery)}: </span> : null}
+        <span className="text-foreground">{highlightText(formatPrimitive(value), searchQuery)}</span>
       </div>
     )
   }
@@ -191,16 +238,18 @@ function JsonTree({
       <button
         type="button"
         className="inline-flex items-center gap-1 text-left"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!forceOpen) setOpen((current) => !current)
+        }}
       >
-        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
-        {name ? <span className="text-[#7aa2f7]">{name}</span> : null}
+        <ChevronRight className={cn('size-3 transition-transform', isOpen && 'rotate-90')} />
+        {name ? <span className="text-[#7aa2f7]">{highlightText(name, searchQuery)}</span> : null}
         <span className="text-muted-foreground">{summarizeContainer(value)}</span>
       </button>
-      {open && (
+      {isOpen && (
         <div className="ml-4 border-l border-border/60 pl-3">
           {entries.map(([childName, childValue]) => (
-            <JsonTree key={childName} name={childName} value={childValue} />
+            <JsonTree key={childName} name={childName} value={childValue} searchQuery={searchQuery} />
           ))}
         </div>
       )}
@@ -263,4 +312,48 @@ function matchesLog(log: LogEntry, query: string): boolean {
     safeStringify(log.data),
   ].join(' ').toLowerCase()
   return haystack.includes(query)
+}
+
+function treeContainsMatch(name: string, value: unknown, query: string): boolean {
+  if (name && textMatches(name, query)) return true
+  if (!isContainer(value)) return textMatches(formatPrimitive(value), query)
+  if (Array.isArray(value)) {
+    return value.some((item, index) => treeContainsMatch(String(index), item, query))
+  }
+  return Object.entries(value).some(([key, item]) => treeContainsMatch(key, item, query))
+}
+
+function textMatches(text: string, query: string): boolean {
+  return query.length > 0 && text.toLowerCase().includes(query)
+}
+
+function highlightText(text: string, query: string): ReactNode {
+  if (!query) return text
+  const normalizedText = text.toLowerCase()
+  const normalizedQuery = query.toLowerCase()
+  if (!normalizedText.includes(normalizedQuery)) return text
+
+  const parts: ReactNode[] = []
+  let start = 0
+  let index = normalizedText.indexOf(normalizedQuery, start)
+
+  while (index !== -1) {
+    if (index > start) {
+      parts.push(text.slice(start, index))
+    }
+    const end = index + query.length
+    parts.push(
+      <mark key={`${index}-${end}`} data-search-hit="true" className={highlightClassName}>
+        {text.slice(index, end)}
+      </mark>
+    )
+    start = end
+    index = normalizedText.indexOf(normalizedQuery, start)
+  }
+
+  if (start < text.length) {
+    parts.push(text.slice(start))
+  }
+
+  return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
