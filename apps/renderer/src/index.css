@@ -225,12 +225,14 @@
 
 @keyframes begin-node-ready-halo-pulse {
   0%, 100% {
-    transform: translate(-50%, -50%) scale(0.92);
-    opacity: 0.45;
+    transform: translate(-50%, -50%) scale(0.88);
+    opacity: 0.58;
+    filter: blur(1px);
   }
   50% {
-    transform: translate(-50%, -50%) scale(1.08);
-    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1.18);
+    opacity: 1;
+    filter: blur(0px);
   }
 }
 
@@ -238,34 +240,37 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 2.7rem;
-  height: 2.7rem;
+  width: 3.2rem;
+  height: 3.2rem;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(16, 185, 129, 0.12) 45%, rgba(16, 185, 129, 0) 72%);
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.42) 0%, rgba(16, 185, 129, 0.22) 38%, rgba(59, 130, 246, 0.14) 58%, rgba(16, 185, 129, 0) 76%);
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.42);
   pointer-events: none;
-  animation: begin-node-ready-halo-pulse 1.8s ease-in-out infinite;
+  animation: begin-node-ready-halo-pulse 1.3s ease-in-out infinite;
 }
 
 .begin-node-ready-ring {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2.7rem;
+  height: 2.7rem;
   border-radius: 9999px;
   padding: 2px;
   background: conic-gradient(
     from 0deg,
-    rgba(16, 185, 129, 0.08) 0deg,
-    rgba(16, 185, 129, 0.95) 90deg,
-    rgba(59, 130, 246, 0.85) 180deg,
-    rgba(16, 185, 129, 0.1) 300deg,
-    rgba(16, 185, 129, 0.08) 360deg
+    rgba(16, 185, 129, 0.04) 0deg,
+    rgba(16, 185, 129, 1) 72deg,
+    rgba(110, 231, 183, 1) 120deg,
+    rgba(59, 130, 246, 0.95) 188deg,
+    rgba(16, 185, 129, 0.18) 290deg,
+    rgba(16, 185, 129, 0.04) 360deg
   );
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   pointer-events: none;
-  animation: begin-node-ready-ring-spin 2.4s linear infinite;
+  animation: begin-node-ready-ring-spin 1.4s linear infinite;
 }
 /* 杈?dash 娴佸姩鍔ㄧ敾 */
 @keyframes edge-dash {
@@ -289,5 +294,6 @@
   background: var(--border);
   border-radius: 4px;
 }
+
 
 
