@@ -104,28 +104,7 @@ function isObserverWait(
   return true
 }
 
-export function getWaitNodeMode(nodeId: string, nodes: ExecNode[], edges: Edge[]): WaitNodeMode {
-  const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
-  const node = nodeMap.get(nodeId)
-  if (!node || node.type !== 'waitResponseNode') return 'standalone'
-
-  if ((outgoing.get(nodeId) ?? []).length > 0) {
-    return 'continue'
-  }
-
-  if (isObserverWait(nodeId, nodeMap, incoming, outgoing)) {
-    return 'observe'
-  }
-
-  const parents = incoming.get(nodeId) ?? []
-  if (parents.length === 1 && nodeMap.get(parents[0])?.type === 'requestNode') {
-    return 'continue'
-  }
-
-  return 'standalone'
-}
-
-export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationResult {
+function validateStructuralRules(nodes: ExecNode[], edges: Edge[]): ValidationResult {
   const { nodeMap, execEdges, incoming, outgoing } = buildAdjacency(nodes, edges)
 
   if (nodeMap.size === 0) {
@@ -149,9 +128,6 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
     }
   }
 
-  const observerWaitIds = new Set<string>()
-  const nextNodeById = new Map<string, string>()
-
   for (const [nodeId, node] of nodeMap) {
     const nodeIncoming = incoming.get(nodeId) ?? []
     const nodeOutgoing = outgoing.get(nodeId) ?? []
@@ -169,6 +145,71 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
       if (nodeOutgoing.length === 1 && nodeMap.get(nodeOutgoing[0])?.type !== 'requestNode') {
         return { valid: false, error: 'A Gc node can only continue to a Cg node.' }
       }
+      continue
+    }
+
+    const { directRequestTargets, continuingWaitTargets } = getRequestTargets(nodeId, nodeMap, outgoing)
+
+    if (directRequestTargets.length > 1) {
+      return { valid: false, error: 'Each Cg node can only continue to one next Cg node.' }
+    }
+    if (continuingWaitTargets.length > 1) {
+      return { valid: false, error: 'Each Cg node can only have one Gc branch that continues execution.' }
+    }
+    if (directRequestTargets.length > 0 && continuingWaitTargets.length > 0) {
+      return { valid: false, error: 'A Cg node cannot continue through both a direct Cg edge and a Gc branch.' }
+    }
+  }
+
+  for (const [nodeId, node] of nodeMap) {
+    if (node.type !== 'waitResponseNode' || !isObserverWait(nodeId, nodeMap, incoming, outgoing)) {
+      continue
+    }
+
+    const parentId = (incoming.get(nodeId) ?? [])[0]
+    if (!parentId) {
+      return { valid: false, error: 'Observer Gc nodes must hang off a single Cg node.' }
+    }
+  }
+
+  return { valid: true }
+}
+
+export function getWaitNodeMode(nodeId: string, nodes: ExecNode[], edges: Edge[]): WaitNodeMode {
+  const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
+  const node = nodeMap.get(nodeId)
+  if (!node || node.type !== 'waitResponseNode') return 'standalone'
+
+  if ((outgoing.get(nodeId) ?? []).length > 0) {
+    return 'continue'
+  }
+
+  if (isObserverWait(nodeId, nodeMap, incoming, outgoing)) {
+    return 'observe'
+  }
+
+  const parents = incoming.get(nodeId) ?? []
+  if (parents.length === 1 && nodeMap.get(parents[0])?.type === 'requestNode') {
+    return 'continue'
+  }
+
+  return 'standalone'
+}
+
+export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationResult {
+  const structural = validateStructuralRules(nodes, edges)
+  if (!structural.valid) {
+    return structural
+  }
+
+  const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
+  const observerWaitIds = new Set<string>()
+  const nextNodeById = new Map<string, string>()
+
+  for (const [nodeId, node] of nodeMap) {
+    const nodeOutgoing = outgoing.get(nodeId) ?? []
+
+    if (node.type === 'waitResponseNode') {
       if (nodeOutgoing.length === 1) {
         nextNodeById.set(nodeId, nodeOutgoing[0])
       }
@@ -180,16 +221,6 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
       nodeMap,
       outgoing,
     )
-
-    if (directRequestTargets.length > 1) {
-      return { valid: false, error: 'Each Cg node can only continue to one next Cg node.' }
-    }
-    if (continuingWaitTargets.length > 1) {
-      return { valid: false, error: 'Each Cg node can only have one Gc branch that continues execution.' }
-    }
-    if (directRequestTargets.length > 0 && continuingWaitTargets.length > 0) {
-      return { valid: false, error: 'A Cg node cannot continue through both a direct Cg edge and a Gc branch.' }
-    }
 
     let observerWaitTargets: string[] = []
     if (plainWaitTargets.length > 0) {
@@ -272,5 +303,5 @@ export function validateExecConnection(connection: Connection, nodes: ExecNode[]
     } satisfies Edge,
   ]
 
-  return validateFlowGraph(nodes, candidateEdges)
+  return validateStructuralRules(nodes, candidateEdges)
 }
