@@ -307,3 +307,124 @@ func TestRunnerStopCancelsExecution(t *testing.T) {
 func defaultPacketConfig() codec.PacketConfig {
 	return codec.PacketConfig{RouteBytes: 2, SeqBytes: 2}
 }
+
+func TestResolveOrderAllowsObserverWaitNodes(t *testing.T) {
+	nodes := []FlowNode{
+		{ID: "cg1", Type: FlowNodeTypeRequest},
+		{ID: "gc_observe", Type: FlowNodeTypeWaitResponse},
+		{ID: "gc_main", Type: FlowNodeTypeWaitResponse},
+		{ID: "cg2", Type: FlowNodeTypeRequest},
+	}
+	edges := []FlowEdge{
+		{Source: "cg1", Target: "gc_observe"},
+		{Source: "cg1", Target: "gc_main"},
+		{Source: "gc_main", Target: "cg2"},
+	}
+
+	order, err := ResolveOrder(nodes, edges)
+	if err != nil {
+		t.Fatalf("ResolveOrder error: %v", err)
+	}
+
+	want := []string{"cg1", "gc_main", "cg2"}
+	if len(order) != len(want) {
+		t.Fatalf("order len = %d, want %d", len(order), len(want))
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order[%d] = %q, want %q", i, order[i], want[i])
+		}
+	}
+}
+
+func TestRunnerObserverWaitReceivesLatePacket(t *testing.T) {
+	runner := NewRunner(defaultPacketConfig())
+	runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
+		return []byte(messageName), nil
+	})
+	runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
+		return map[string]any{
+			"message": messageName,
+			"body":    string(data),
+		}, nil
+	})
+	runner.SetIncomingMessageNameResolver(func(route uint32, stringRoute string) string {
+		switch route {
+		case 2001:
+			return "game.GcLogin"
+		case 2002:
+			return "game.GcNotice"
+		default:
+			return ""
+		}
+	})
+	callCount := 0
+	runner.SetSendFunc(func(data []byte) error {
+		callCount++
+		switch callCount {
+		case 1:
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				runner.PushIncomingPacket(&codec.Packet{Route: 2001, Data: []byte("main")})
+			}()
+			go func() {
+				time.Sleep(25 * time.Millisecond)
+				runner.PushIncomingPacket(&codec.Packet{Route: 2002, Data: []byte("observe")})
+			}()
+		case 2:
+			pkt, err := codec.DecodeBytes(data, defaultPacketConfig())
+			if err != nil {
+				return err
+			}
+			go func(seq uint32) {
+				time.Sleep(60 * time.Millisecond)
+				runner.SeqCtx().Resolve(seq, []byte("done"))
+			}(pkt.Seq)
+		}
+		return nil
+	})
+
+	nodes := []FlowNode{
+		{ID: "cg1", Type: FlowNodeTypeRequest, MessageName: "game.CgLogin", Route: 1001},
+		{ID: "gc_observe", Type: FlowNodeTypeWaitResponse, MessageName: "game.GcNotice", Route: 2002},
+		{ID: "gc_main", Type: FlowNodeTypeWaitResponse, MessageName: "game.GcLogin", Route: 2001},
+		{ID: "cg2", Type: FlowNodeTypeRequest, MessageName: "game.CgEnter", Route: 1002},
+	}
+	edges := []FlowEdge{
+		{Source: "cg1", Target: "gc_observe"},
+		{Source: "cg1", Target: "gc_main"},
+		{Source: "gc_main", Target: "cg2"},
+	}
+
+	resultsCh := make(chan NodeResult, 8)
+	err := runner.Execute(context.Background(), nodes, edges, func(result NodeResult) {
+		resultsCh <- result
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	deadline := time.After(300 * time.Millisecond)
+	results := make(map[string]NodeResult)
+	for len(results) < 4 {
+		select {
+		case result := <-resultsCh:
+			results[result.NodeID] = result
+		case <-deadline:
+			t.Fatalf("timed out waiting for observer results, got %d", len(results))
+		}
+	}
+
+	if !results["cg1"].Success {
+		t.Fatalf("cg1 result = %+v", results["cg1"])
+	}
+	if !results["gc_main"].Success || results["gc_main"].Response["body"] != "main" {
+		t.Fatalf("gc_main result = %+v", results["gc_main"])
+	}
+	if !results["gc_observe"].Success || results["gc_observe"].Response["body"] != "observe" {
+		t.Fatalf("gc_observe result = %+v", results["gc_observe"])
+	}
+	if !results["cg2"].Success || results["cg2"].Response["body"] != "done" {
+		t.Fatalf("cg2 result = %+v", results["cg2"])
+	}
+}

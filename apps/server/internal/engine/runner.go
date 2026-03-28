@@ -54,6 +54,12 @@ type StringRouteResponseNameResolver func(route string) string
 
 type IncomingMessageNameResolver func(route uint32, stringRoute string) string
 
+type executionPlan struct {
+	order                  []string
+	observerWaitsByRequest map[string][]string
+	requestHasAttachedWait map[string]bool
+}
+
 type Runner struct {
 	mu                     sync.Mutex
 	running                bool
@@ -71,6 +77,10 @@ type Runner struct {
 	inboxMu                sync.Mutex
 	inbox                  []*codec.Packet
 	inboxSignal            chan struct{}
+	observerMu             sync.Mutex
+	observerWaits          map[string]*FlowNode
+	callbackMu             sync.Mutex
+	nodeCallback           NodeCallback
 }
 
 func NewRunner(packetCfg codec.PacketConfig) *Runner {
@@ -80,6 +90,7 @@ func NewRunner(packetCfg codec.PacketConfig) *Runner {
 		thriftProtocol: "binary",
 		timeout:        5 * time.Second,
 		inboxSignal:    make(chan struct{}, 1),
+		observerWaits:  make(map[string]*FlowNode),
 	}
 }
 
@@ -140,13 +151,21 @@ func (r *Runner) Running() bool {
 }
 
 func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
+	plan, err := resolveExecutionPlan(nodes, edges)
+	if err != nil {
+		return nil, err
+	}
+	return plan.order, nil
+}
+
+func resolveExecutionPlan(nodes []FlowNode, edges []FlowEdge) (*executionPlan, error) {
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("empty node list")
 	}
 
 	nodeMap := make(map[string]*FlowNode)
-	inDegree := make(map[string]int)
-	outEdge := make(map[string]string)
+	incoming := make(map[string][]string)
+	outgoing := make(map[string][]string)
 
 	for i := range nodes {
 		nodeType := normalizeNodeType(nodes[i].Type)
@@ -154,23 +173,151 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 			continue
 		}
 		nodeMap[nodes[i].ID] = &nodes[i]
-		inDegree[nodes[i].ID] = 0
+		incoming[nodes[i].ID] = nil
+		outgoing[nodes[i].ID] = nil
+	}
+
+	if len(nodeMap) == 0 {
+		return nil, fmt.Errorf("empty node list")
 	}
 
 	for _, e := range edges {
-		if _, ok := nodeMap[e.Source]; !ok {
+		source := nodeMap[e.Source]
+		target := nodeMap[e.Target]
+		if source == nil || target == nil {
 			continue
 		}
-		if _, ok := nodeMap[e.Target]; !ok {
+		outgoing[e.Source] = append(outgoing[e.Source], e.Target)
+		incoming[e.Target] = append(incoming[e.Target], e.Source)
+	}
+
+	observerWaitIDs := make(map[string]bool)
+	observerWaitsByRequest := make(map[string][]string)
+	requestHasAttachedWait := make(map[string]bool)
+	nextNodeByID := make(map[string]string)
+
+	for id, node := range nodeMap {
+		nodeType := normalizeNodeType(node.Type)
+		switch nodeType {
+		case FlowNodeTypeRequest:
+			var directRequestTargets []string
+			var continuingWaitTargets []string
+			var plainWaitTargets []string
+
+			for _, targetID := range outgoing[id] {
+				target := nodeMap[targetID]
+				if target == nil {
+					continue
+				}
+
+				switch normalizeNodeType(target.Type) {
+				case FlowNodeTypeRequest:
+					directRequestTargets = append(directRequestTargets, targetID)
+				case FlowNodeTypeWaitResponse:
+					waitOutgoing := outgoing[targetID]
+					if len(waitOutgoing) > 1 {
+						return nil, fmt.Errorf("wait node %s can only continue to one request node", targetID)
+					}
+					if len(waitOutgoing) == 0 {
+						plainWaitTargets = append(plainWaitTargets, targetID)
+						continue
+					}
+
+					nextID := waitOutgoing[0]
+					next := nodeMap[nextID]
+					if next == nil || normalizeNodeType(next.Type) != FlowNodeTypeRequest {
+						return nil, fmt.Errorf("wait node %s must continue to a request node", targetID)
+					}
+					continuingWaitTargets = append(continuingWaitTargets, targetID)
+				default:
+					return nil, fmt.Errorf("request node %s cannot connect to node %s", id, targetID)
+				}
+			}
+
+			if len(directRequestTargets) > 1 {
+				return nil, fmt.Errorf("request node %s can only continue to one request node", id)
+			}
+			if len(continuingWaitTargets) > 1 {
+				return nil, fmt.Errorf("request node %s can only have one continuing wait node", id)
+			}
+			if len(directRequestTargets) > 0 && len(continuingWaitTargets) > 0 {
+				return nil, fmt.Errorf("request node %s has multiple continuation paths", id)
+			}
+
+			observerWaitTargets := make([]string, 0, len(plainWaitTargets))
+			if len(plainWaitTargets) > 0 {
+				if len(directRequestTargets) == 0 && len(continuingWaitTargets) == 0 && len(plainWaitTargets) == 1 {
+					nextNodeByID[id] = plainWaitTargets[0]
+				} else {
+					observerWaitTargets = append(observerWaitTargets, plainWaitTargets...)
+				}
+			}
+
+			if len(plainWaitTargets) > 0 || len(continuingWaitTargets) > 0 {
+				requestHasAttachedWait[id] = true
+			}
+
+			if len(observerWaitTargets) > 0 {
+				observerWaitsByRequest[id] = append([]string(nil), observerWaitTargets...)
+				for _, observerID := range observerWaitTargets {
+					observerWaitIDs[observerID] = true
+				}
+			}
+
+			if len(directRequestTargets) == 1 {
+				nextNodeByID[id] = directRequestTargets[0]
+			}
+			if len(continuingWaitTargets) == 1 {
+				nextNodeByID[id] = continuingWaitTargets[0]
+			}
+
+		case FlowNodeTypeWaitResponse:
+			if len(outgoing[id]) > 1 {
+				return nil, fmt.Errorf("wait node %s can only continue to one request node", id)
+			}
+			if len(incoming[id]) > 1 {
+				return nil, fmt.Errorf("wait node %s can only have one parent request node", id)
+			}
+			if len(incoming[id]) == 1 {
+				parent := nodeMap[incoming[id][0]]
+				if parent == nil || normalizeNodeType(parent.Type) != FlowNodeTypeRequest {
+					return nil, fmt.Errorf("wait node %s must be attached to a request node", id)
+				}
+			}
+			if len(outgoing[id]) == 1 {
+				nextID := outgoing[id][0]
+				next := nodeMap[nextID]
+				if next == nil || normalizeNodeType(next.Type) != FlowNodeTypeRequest {
+					return nil, fmt.Errorf("wait node %s must continue to a request node", id)
+				}
+				nextNodeByID[id] = nextID
+			}
+		}
+	}
+
+	mainNodeIDs := make(map[string]bool)
+	inDegree := make(map[string]int)
+	for id := range nodeMap {
+		if observerWaitIDs[id] {
 			continue
 		}
-		outEdge[e.Source] = e.Target
-		inDegree[e.Target]++
+		mainNodeIDs[id] = true
+		inDegree[id] = 0
+	}
+
+	for sourceID, targetID := range nextNodeByID {
+		if !mainNodeIDs[sourceID] || !mainNodeIDs[targetID] {
+			continue
+		}
+		inDegree[targetID]++
+		if inDegree[targetID] > 1 {
+			return nil, fmt.Errorf("node %s has multiple incoming execution paths", targetID)
+		}
 	}
 
 	var starts []string
-	for id, deg := range inDegree {
-		if deg == 0 {
+	for id, degree := range inDegree {
+		if degree == 0 {
 			starts = append(starts, id)
 		}
 	}
@@ -182,9 +329,9 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 		return nil, fmt.Errorf("multiple start nodes: %v", starts)
 	}
 
-	order := make([]string, 0, len(nodeMap))
-	current := starts[0]
+	order := make([]string, 0, len(mainNodeIDs))
 	visited := make(map[string]bool)
+	current := starts[0]
 
 	for current != "" {
 		if visited[current] {
@@ -192,18 +339,22 @@ func ResolveOrder(nodes []FlowNode, edges []FlowEdge) ([]string, error) {
 		}
 		visited[current] = true
 		order = append(order, current)
-		current = outEdge[current]
+		current = nextNodeByID[current]
 	}
 
-	if len(order) != len(nodeMap) {
-		return nil, fmt.Errorf("disconnected graph: resolved %d of %d nodes", len(order), len(nodeMap))
+	if len(order) != len(mainNodeIDs) {
+		return nil, fmt.Errorf("disconnected graph: resolved %d of %d nodes", len(order), len(mainNodeIDs))
 	}
 
-	return order, nil
+	return &executionPlan{
+		order:                  order,
+		observerWaitsByRequest: observerWaitsByRequest,
+		requestHasAttachedWait: requestHasAttachedWait,
+	}, nil
 }
 
-func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge, onNode NodeCallback) error {
-	order, err := ResolveOrder(nodes, edges)
+func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge, onNode NodeCallback) (err error) {
+	plan, err := resolveExecutionPlan(nodes, edges)
 	if err != nil {
 		return err
 	}
@@ -223,6 +374,8 @@ func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge
 	r.cancel = cancel
 	r.seqCtx.Reset()
 	r.resetIncomingPackets()
+	r.resetObserverWaits()
+	r.setNodeCallback(onNode)
 	r.mu.Unlock()
 
 	defer func() {
@@ -230,27 +383,51 @@ func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge
 		r.running = false
 		r.cancel = nil
 		r.mu.Unlock()
+
+		if err != nil {
+			r.resetObserverWaits()
+			r.setNodeCallback(nil)
+			return
+		}
+
+		if !r.hasActiveObserverWaits() {
+			r.setNodeCallback(nil)
+		}
 	}()
 
-	for index, nodeID := range order {
+	for index, nodeID := range plan.order {
 		select {
 		case <-execCtx.Done():
-			return execCtx.Err()
+			err = execCtx.Err()
+			return err
 		default:
 		}
 
 		node := nodeMap[nodeID]
-		var nextNode *FlowNode
-		if index+1 < len(order) {
-			nextNode = nodeMap[order[index+1]]
+		if node == nil {
+			err = fmt.Errorf("node %s not found", nodeID)
+			return err
 		}
 
-		result := r.executeNode(execCtx, node, nextNode)
-		if onNode != nil {
-			onNode(result)
+		if normalizeNodeType(node.Type) == FlowNodeTypeRequest {
+			for _, observerID := range plan.observerWaitsByRequest[nodeID] {
+				observerNode := nodeMap[observerID]
+				if observerNode != nil {
+					r.activateObserverWait(observerNode)
+				}
+			}
 		}
+
+		var nextNode *FlowNode
+		if index+1 < len(plan.order) {
+			nextNode = nodeMap[plan.order[index+1]]
+		}
+
+		result := r.executeNode(execCtx, node, nextNode, plan.requestHasAttachedWait[nodeID])
+		r.emitNodeResult(result)
 		if !result.Success {
-			return fmt.Errorf("node %s failed: %s", nodeID, result.Error)
+			err = fmt.Errorf("node %s failed: %s", nodeID, result.Error)
+			return err
 		}
 	}
 
@@ -263,6 +440,8 @@ func (r *Runner) Stop() {
 	if r.cancel != nil {
 		r.cancel()
 	}
+	r.resetObserverWaits()
+	r.setNodeCallback(nil)
 }
 
 func (r *Runner) PushIncomingPacket(pkt *codec.Packet) {
@@ -285,13 +464,20 @@ func (r *Runner) PushIncomingPacket(pkt *codec.Packet) {
 	r.inbox = append(r.inbox, clone)
 	r.inboxMu.Unlock()
 
+	r.dispatchObserverPacket(clone)
+
+	select {
+	case <-r.inboxSignal:
+	default:
+	}
+
 	select {
 	case r.inboxSignal <- struct{}{}:
 	default:
 	}
 }
 
-func (r *Runner) executeNode(ctx context.Context, node *FlowNode, nextNode *FlowNode) NodeResult {
+func (r *Runner) executeNode(ctx context.Context, node *FlowNode, nextNode *FlowNode, hasAttachedWait bool) NodeResult {
 	switch normalizeNodeType(node.Type) {
 	case FlowNodeTypeWaitResponse:
 		return r.executeWaitResponseNode(ctx, node)
@@ -302,7 +488,7 @@ func (r *Runner) executeNode(ctx context.Context, node *FlowNode, nextNode *Flow
 			Success:  true,
 		}
 	default:
-		waitForResponse := normalizeNodeType(getNodeType(nextNode)) != FlowNodeTypeWaitResponse
+		waitForResponse := !hasAttachedWait && normalizeNodeType(getNodeType(nextNode)) != FlowNodeTypeWaitResponse
 		return r.executeRequestNode(ctx, node, waitForResponse)
 	}
 }
@@ -421,28 +607,7 @@ func (r *Runner) executeWaitResponseNode(ctx context.Context, node *FlowNode) No
 		return result
 	}
 
-	responseName := r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute)
-	if responseName == "" {
-		responseName = node.MessageName
-	}
-	if responseName == "" {
-		result.Error = "response message name is empty"
-		result.Duration = time.Since(start).Milliseconds()
-		return result
-	}
-	result.ResponseMsg = responseName
-
-	response, err := r.decoder(responseName, pkt.Data)
-	if err != nil {
-		result.Error = fmt.Sprintf("decode response: %v", err)
-		result.Duration = time.Since(start).Milliseconds()
-		return result
-	}
-
-	result.Success = true
-	result.Response = response
-	result.Duration = time.Since(start).Milliseconds()
-	return result
+	return r.decodeWaitPacket(node, pkt, start)
 }
 
 func (r *Runner) waitForIncomingPacket(ctx context.Context, node *FlowNode) (*codec.Packet, error) {
@@ -546,6 +711,101 @@ func (r *Runner) resetIncomingPackets() {
 		default:
 			return
 		}
+	}
+}
+
+func (r *Runner) activateObserverWait(node *FlowNode) {
+	if node == nil {
+		return
+	}
+
+	clone := *node
+	r.observerMu.Lock()
+	r.observerWaits[node.ID] = &clone
+	r.observerMu.Unlock()
+}
+
+func (r *Runner) dispatchObserverPacket(pkt *codec.Packet) {
+	r.observerMu.Lock()
+	matched := make([]*FlowNode, 0)
+	for id, node := range r.observerWaits {
+		if !r.matchesWaitNode(node, pkt) {
+			continue
+		}
+		delete(r.observerWaits, id)
+		matched = append(matched, node)
+	}
+	r.observerMu.Unlock()
+
+	for _, node := range matched {
+		r.emitNodeResult(r.decodeWaitPacket(node, pkt, time.Now()))
+	}
+
+	if !r.Running() && !r.hasActiveObserverWaits() {
+		r.setNodeCallback(nil)
+	}
+}
+
+func (r *Runner) decodeWaitPacket(node *FlowNode, pkt *codec.Packet, start time.Time) NodeResult {
+	result := NodeResult{
+		NodeID:      node.ID,
+		NodeType:    FlowNodeTypeWaitResponse,
+		ResponseMsg: node.MessageName,
+	}
+
+	if r.decoder == nil {
+		result.Error = "message decoder not configured"
+		result.Duration = time.Since(start).Milliseconds()
+		return result
+	}
+
+	responseName := r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute)
+	if responseName == "" {
+		responseName = node.MessageName
+	}
+	if responseName == "" {
+		result.Error = "response message name is empty"
+		result.Duration = time.Since(start).Milliseconds()
+		return result
+	}
+	result.ResponseMsg = responseName
+
+	response, err := r.decoder(responseName, pkt.Data)
+	if err != nil {
+		result.Error = fmt.Sprintf("decode response: %v", err)
+		result.Duration = time.Since(start).Milliseconds()
+		return result
+	}
+
+	result.Success = true
+	result.Response = response
+	result.Duration = time.Since(start).Milliseconds()
+	return result
+}
+
+func (r *Runner) resetObserverWaits() {
+	r.observerMu.Lock()
+	r.observerWaits = make(map[string]*FlowNode)
+	r.observerMu.Unlock()
+}
+
+func (r *Runner) hasActiveObserverWaits() bool {
+	r.observerMu.Lock()
+	defer r.observerMu.Unlock()
+	return len(r.observerWaits) > 0
+}
+
+func (r *Runner) setNodeCallback(callback NodeCallback) {
+	r.callbackMu.Lock()
+	r.nodeCallback = callback
+	r.callbackMu.Unlock()
+}
+
+func (r *Runner) emitNodeResult(result NodeResult) {
+	r.callbackMu.Lock()
+	defer r.callbackMu.Unlock()
+	if r.nodeCallback != nil {
+		r.nodeCallback(result)
 	}
 }
 

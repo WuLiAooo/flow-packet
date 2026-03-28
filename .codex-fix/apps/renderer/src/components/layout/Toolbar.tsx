@@ -7,6 +7,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { executeFlow, connectTCP } from '@/services/api'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { validateFlowGraph } from '@/lib/flowGraph'
 import { toast } from 'sonner'
 
 const stateColors: Record<string, string> = {
@@ -46,7 +47,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
     useConnectionStore.getState().setState('connecting')
 
     const isDueProtocol = connection.frameConfig?.fields?.some(
-      (f) => f.name.toLowerCase() === 'header' && f.bytes === 1
+      (f) => f.name.toLowerCase() === 'header' && f.bytes === 1,
     ) ?? false
     const connectTimeout = useConnectionStore.getState().config.timeout || 5000
 
@@ -72,6 +73,15 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
   const handleRun = async () => {
     if (!isConnected || execStatus === 'running' || nodes.length === 0 || !activeConnectionId) return
+
+    const validation = validateFlowGraph(nodes, edges)
+    if (!validation.valid) {
+      toast.error('Invalid flow', {
+        description: validation.error,
+      })
+      return
+    }
+
     try {
       const flowNodes = nodes.map((node) => {
         if (node.type === 'requestNode') {

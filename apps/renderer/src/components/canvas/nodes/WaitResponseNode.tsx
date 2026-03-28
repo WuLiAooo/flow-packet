@@ -3,7 +3,9 @@ import { Inbox } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import type { WaitResponseNodeData } from '@/stores/canvasStore'
+import { useCanvasStore } from '@/stores/canvasStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { getWaitNodeMode } from '@/lib/flowGraph'
 import { NodeRuntimePreview } from './NodeRuntimePreview'
 
 const pinColors: Record<string, string> = {
@@ -23,7 +25,10 @@ function getPinColor(type: string): string {
 
 export function WaitResponseNode({ id, data, selected }: NodeProps<Node<WaitResponseNodeData>>) {
   const nodeStatus = useExecutionStore((s) => s.nodeStatuses[id])
+  const nodes = useCanvasStore((s) => s.nodes)
+  const edges = useCanvasStore((s) => s.edges)
   const shortName = data.messageName.split('.').pop() || data.messageName
+  const mode = getWaitNodeMode(id, nodes, edges)
 
   const isRunning = nodeStatus?.status === 'running'
   const isSuccess = nodeStatus?.status === 'success'
@@ -33,6 +38,8 @@ export function WaitResponseNode({ id, data, selected }: NodeProps<Node<WaitResp
   if (isRunning) statusColor = 'var(--status-warning)'
   else if (isSuccess) statusColor = 'var(--status-success)'
   else if (isError) statusColor = 'var(--status-error)'
+
+  const modeLabel = mode === 'observe' ? 'Observe Gc' : 'Wait Gc'
 
   return (
     <Card
@@ -70,7 +77,7 @@ export function WaitResponseNode({ id, data, selected }: NodeProps<Node<WaitResp
         <Inbox className="size-3.5 shrink-0 text-emerald-600" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-bold text-emerald-700">{shortName}</div>
-          <div className="truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Wait Gc</div>
+          <div className="truncate text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{modeLabel}</div>
         </div>
 
         <div

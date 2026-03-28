@@ -17,9 +17,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { ColorMode, Node } from '@xyflow/react'
+import { toast } from 'sonner'
 import { useCanvasStore, type AnyNodeData } from '@/stores/canvasStore'
 import { useTheme } from '@/hooks/use-theme'
 import { useProtoStore } from '@/stores/protoStore'
+import { validateExecConnection } from '@/lib/flowGraph'
 import { parseDraggedProtocolMessage, createRequestNode, createWaitResponseNode } from '@/lib/protocolNodes'
 import { RequestNode } from './nodes/RequestNode'
 import { WaitResponseNode } from './nodes/WaitResponseNode'
@@ -58,20 +60,28 @@ export function FlowCanvas() {
     (changes) => {
       updateNodes((nds) => applyNodeChanges(changes, nds) as Node<AnyNodeData>[])
     },
-    [updateNodes]
+    [updateNodes],
   )
 
   const onEdgesChange: OnEdgesChange = useCallback(
     (changes) => {
       updateEdges((eds) => applyEdgeChanges(changes, eds))
     },
-    [updateEdges]
+    [updateEdges],
   )
 
   const takeSnapshot = useCanvasStore((s) => s.takeSnapshot)
 
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
+      const validation = validateExecConnection(connection, nodes, edges)
+      if (!validation.valid) {
+        toast.error('Invalid connection', {
+          description: validation.error,
+        })
+        return
+      }
+
       takeSnapshot()
       updateEdges((eds) =>
         addEdge(
@@ -79,25 +89,25 @@ export function FlowCanvas() {
             ...connection,
             type: 'execEdge',
           },
-          eds
-        )
+          eds,
+        ),
       )
     },
-    [updateEdges, takeSnapshot]
+    [edges, nodes, takeSnapshot, updateEdges],
   )
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       setSelectedNodeId(node.id)
     },
-    [setSelectedNodeId]
+    [setSelectedNodeId],
   )
 
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       useCanvasStore.getState().setEditingNodeId(node.id)
     },
-    []
+    [],
   )
 
   const onPaneClick = useCallback(() => {
@@ -131,7 +141,7 @@ export function FlowCanvas() {
         }
       }
     },
-    [removeNode]
+    [removeNode],
   )
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -144,7 +154,7 @@ export function FlowCanvas() {
       e.preventDefault()
 
       const dragged = parseDraggedProtocolMessage(
-        e.dataTransfer.getData('application/flow-packet-message')
+        e.dataTransfer.getData('application/flow-packet-message'),
       )
       if (!dragged) return
 
@@ -162,7 +172,7 @@ export function FlowCanvas() {
 
       addNode(newNode)
     },
-    [addNode, routeMappings]
+    [addNode, routeMappings],
   )
 
   const onWrapperMouseDown = useCallback(
@@ -177,7 +187,7 @@ export function FlowCanvas() {
         setDrawingComment(true)
       }
     },
-    []
+    [],
   )
 
   const onWrapperMouseMove = useCallback(
@@ -188,7 +198,7 @@ export function FlowCanvas() {
       const flowPos = instance.screenToFlowPosition({ x: e.clientX, y: e.clientY })
       setDrawCurrent(flowPos)
     },
-    [drawingComment]
+    [drawingComment],
   )
 
   const onWrapperMouseUp = useCallback(
@@ -218,7 +228,7 @@ export function FlowCanvas() {
       setDrawStart(null)
       setDrawCurrent(null)
     },
-    [drawingComment, drawStart, drawCurrent, addNode]
+    [drawingComment, drawStart, drawCurrent, addNode],
   )
 
   let previewRect: { left: number; top: number; width: number; height: number } | null = null
