@@ -1,11 +1,11 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* 节点/引脚/连线 领域专属变量 — 白天模式 */
+  /* 鑺傜偣/寮曡剼/杩炵嚎 棰嗗煙涓撳睘鍙橀噺 鈥?鐧藉ぉ妯″紡 */
   --node-bg: #F0F0FA;
   --node-title-request: #1B6EF3;
   --node-title-condition: #2ECC71;
@@ -26,7 +26,7 @@
   --status-error: #E74C3C;
   --status-warning: #F39C12;
 
-  /* 区域底色（参考 VS Code 深浅层级） */
+  /* 鍖哄煙搴曡壊锛堝弬鑰?VS Code 娣辨祬灞傜骇锛?*/
   --bg-toolbar: oklch(0.955 0.001 285.0);
   --bg-activity: oklch(0.950 0.001 285.0);
   --bg-controller: oklch(0.965 0.001 285.0);
@@ -69,13 +69,13 @@
 }
 
 .dark {
-  /* 节点/引脚/连线 领域专属变量 — 黑夜模式覆盖 */
+  /* 鑺傜偣/寮曡剼/杩炵嚎 棰嗗煙涓撳睘鍙橀噺 鈥?榛戝妯″紡瑕嗙洊 */
   --node-bg: #2A2A4A;
   --edge-exec: #FFFFFF;
   --pin-int: #7ED6DF;
   --primary-bright: #4ade80;
 
-  /* 区域底色（参考 VS Code 深浅层级） */
+  /* 鍖哄煙搴曡壊锛堝弬鑰?VS Code 娣辨祬灞傜骇锛?*/
   --bg-toolbar: oklch(0.185 0.005 285.8);
   --bg-activity: oklch(0.180 0.005 285.8);
   --bg-controller: oklch(0.165 0.005 285.8);
@@ -198,17 +198,17 @@
   cursor: default !important;
 }
 
-/* 备注节点始终在业务节点下方 */
+/* 澶囨敞鑺傜偣濮嬬粓鍦ㄤ笟鍔¤妭鐐逛笅鏂?*/
 .react-flow__node-commentNode {
   z-index: -1 !important;
 }
 
-/* 节点选中平滑过渡 */
+/* 鑺傜偣閫変腑骞虫粦杩囨浮 */
 .react-flow__node.selected {
   transition: box-shadow 0.3s ease;
 }
 
-/* 节点 running 脉冲动画 */
+/* 鑺傜偣 running 鑴夊啿鍔ㄧ敾 */
 @keyframes node-pulse {
   0%, 100% { box-shadow: 0 0 0 1px var(--status-warning); }
   50% { box-shadow: 0 0 8px 2px var(--status-warning); }
@@ -218,12 +218,61 @@
   animation: node-pulse 1.5s ease-in-out infinite;
 }
 
-/* 边 dash 流动动画 */
+@keyframes begin-node-ready-ring-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes begin-node-ready-halo-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: 0.9;
+  }
+}
+
+.begin-node-ready-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(16, 185, 129, 0.12) 45%, rgba(16, 185, 129, 0) 72%);
+  pointer-events: none;
+  animation: begin-node-ready-halo-pulse 1.8s ease-in-out infinite;
+}
+
+.begin-node-ready-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 9999px;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    rgba(16, 185, 129, 0.08) 0deg,
+    rgba(16, 185, 129, 0.95) 90deg,
+    rgba(59, 130, 246, 0.85) 180deg,
+    rgba(16, 185, 129, 0.1) 300deg,
+    rgba(16, 185, 129, 0.08) 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  pointer-events: none;
+  animation: begin-node-ready-ring-spin 2.4s linear infinite;
+}
+/* 杈?dash 娴佸姩鍔ㄧ敾 */
 @keyframes edge-dash {
   to { stroke-dashoffset: -10; }
 }
 
-/* Sonner toast dark mode - 覆盖默认纯黑 #000 为深灰 */
+/* Sonner toast dark mode - 瑕嗙洊榛樿绾粦 #000 涓烘繁鐏?*/
 [data-sonner-toaster][data-sonner-theme="dark"] {
   --normal-bg: #1c1c1c !important;
   --normal-bg-hover: #262626 !important;
@@ -240,4 +289,5 @@
   background: var(--border);
   border-radius: 4px;
 }
+
 

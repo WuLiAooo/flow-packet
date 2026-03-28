@@ -10,7 +10,6 @@ import { TitleBar } from '@/components/layout/TitleBar'
 import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
 import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
 import { FlowCanvas } from '@/components/canvas/FlowCanvas'
-import { DeviceSessionStatusPanel } from '@/components/canvas/DeviceSessionStatusPanel'
 import { PropertySheet } from '@/components/editor/PropertySheet'
 import { LogPanel } from '@/components/execution/LogPanel'
 import { WelcomePage } from '@/components/connection/WelcomePage'
@@ -248,10 +247,7 @@ function App() {
                 tabs={<CanvasTabs />}
                 center={
                   activeTabId ? (
-                    <>
-                      <FlowCanvas />
-                      <DeviceSessionStatusPanel />
-                    </>
+                    <FlowCanvas />
                   ) : (
                     <div
                       className="flex h-full flex-col items-center justify-center text-muted-foreground"
@@ -278,3 +274,4 @@ function App() {
 }
 
 export default App
+
