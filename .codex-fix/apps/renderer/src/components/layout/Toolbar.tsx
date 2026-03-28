@@ -7,7 +7,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { executeFlow, connectTCP } from '@/services/api'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { formatValidationMessage, validateFlowGraph } from '@/lib/flowGraph'
+import { formatValidationMessage, getExecutableFlowFromBegin } from '@/lib/flowGraph'
 import { toast } from 'sonner'
 
 const stateColors: Record<string, string> = {
@@ -74,16 +74,16 @@ export function Toolbar({ onBack }: ToolbarProps) {
   const handleRun = async () => {
     if (!isConnected || execStatus === 'running' || nodes.length === 0 || !activeConnectionId) return
 
-    const validation = validateFlowGraph(nodes, edges)
-    if (!validation.valid) {
+    const executable = getExecutableFlowFromBegin(nodes, edges)
+    if (!executable.validation.valid) {
       toast.error('Invalid flow', {
-        description: formatValidationMessage(validation),
+        description: formatValidationMessage(executable.validation),
       })
       return
     }
 
     try {
-      const flowNodes = nodes.map((node) => {
+      const flowNodes = executable.nodes.map((node) => {
         if (node.type === 'requestNode') {
           return {
             id: node.id,
@@ -94,28 +94,16 @@ export function Toolbar({ onBack }: ToolbarProps) {
             fields: node.data.fields,
           }
         }
-        if (node.type === 'waitResponseNode') {
-          return {
-            id: node.id,
-            type: 'wait_response',
-            messageName: node.data.messageName,
-            route: node.data.route,
-            stringRoute: node.data.stringRoute,
-            fields: {},
-          }
-        }
         return {
           id: node.id,
-          type: 'comment',
-          messageName: '',
-          route: 0,
-          stringRoute: '',
+          type: 'wait_response',
+          messageName: node.data.messageName,
+          route: node.data.route,
+          stringRoute: node.data.stringRoute,
           fields: {},
         }
       })
-      const flowEdges = edges
-        .filter((e) => e.type === 'execEdge')
-        .map((e) => ({ source: e.source, target: e.target }))
+      const flowEdges = executable.edges.map((edge) => ({ source: edge.source, target: edge.target }))
       await executeFlow(flowNodes, flowEdges, activeConnectionId)
     } catch {
       // handled by event
@@ -141,7 +129,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
         variant="ghost"
         size="sm"
         className="h-7 gap-1 px-2"
-        disabled={!isConnected || execStatus === 'running' || nodes.length === 0}
+        disabled={!isConnected || execStatus === 'running'}
         onClick={handleRun}
       >
         <Play className="h-3.5 w-3.5" style={{ color: 'var(--status-success)' }} />

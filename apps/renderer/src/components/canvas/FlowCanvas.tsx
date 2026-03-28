@@ -1,4 +1,4 @@
-﻿import { useCallback, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -14,6 +14,7 @@ import {
   applyEdgeChanges,
   addEdge,
   type ReactFlowInstance,
+  type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { ColorMode, Node } from '@xyflow/react'
@@ -22,7 +23,9 @@ import { useCanvasStore, type AnyNodeData } from '@/stores/canvasStore'
 import { useTheme } from '@/hooks/use-theme'
 import { useProtoStore } from '@/stores/protoStore'
 import { validateExecConnection } from '@/lib/flowGraph'
+import { Button } from '@/components/ui/button'
 import { parseDraggedProtocolMessage, createRequestNode, createWaitResponseNode } from '@/lib/protocolNodes'
+import { BeginNode } from './nodes/BeginNode'
 import { RequestNode } from './nodes/RequestNode'
 import { WaitResponseNode } from './nodes/WaitResponseNode'
 import { CommentNode } from './nodes/CommentNode'
@@ -30,6 +33,7 @@ import { ExecEdge } from './edges/ExecEdge'
 import { CanvasControls } from './CanvasControls'
 
 const nodeTypes: NodeTypes = {
+  beginNode: BeginNode,
   requestNode: RequestNode,
   waitResponseNode: WaitResponseNode,
   commentNode: CommentNode,
@@ -37,6 +41,21 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   execEdge: ExecEdge,
+}
+
+interface NodeMenuState {
+  nodeId: string
+  x: number
+  y: number
+}
+
+function buildBeginEdge(beginId: string, targetId: string): Edge {
+  return {
+    id: `begin-edge:${beginId}:${targetId}`,
+    source: beginId,
+    target: targetId,
+    type: 'execEdge',
+  }
 }
 
 export function FlowCanvas() {
@@ -55,6 +74,7 @@ export function FlowCanvas() {
   const [drawingComment, setDrawingComment] = useState(false)
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null)
   const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null)
+  const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null)
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
@@ -98,24 +118,75 @@ export function FlowCanvas() {
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
+      setNodeMenu(null)
       setSelectedNodeId(node.id)
     },
     [setSelectedNodeId],
   )
 
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      if (node.type !== 'requestNode') {
+        setNodeMenu(null)
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedNodeId(node.id)
+      setNodeMenu({
+        nodeId: node.id,
+        x: event.clientX,
+        y: event.clientY,
+      })
+    },
+    [setSelectedNodeId],
+  )
+
+  const handleSetAsBegin = useCallback(() => {
+    if (!nodeMenu) return
+
+    const beginNode = nodes.find((node) => node.type === 'beginNode')
+    if (!beginNode) {
+      setNodeMenu(null)
+      toast.error('Begin node is missing')
+      return
+    }
+
+    const nextTargetId = nodeMenu.nodeId
+    const currentEdge = edges.find((edge) => edge.type === 'execEdge' && edge.source === beginNode.id)
+    if (currentEdge?.target === nextTargetId) {
+      setNodeMenu(null)
+      return
+    }
+
+    takeSnapshot()
+    updateEdges((currentEdges) => {
+      const withoutBeginEdges = currentEdges.filter(
+        (edge) => !(edge.type === 'execEdge' && edge.source === beginNode.id),
+      )
+      return [...withoutBeginEdges, buildBeginEdge(beginNode.id, nextTargetId)]
+    })
+    setNodeMenu(null)
+    toast.success('Begin target updated')
+  }, [edges, nodeMenu, nodes, takeSnapshot, updateEdges])
+
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
+      if (node.type === 'beginNode') return
       useCanvasStore.getState().setEditingNodeId(node.id)
     },
     [],
   )
 
   const onPaneClick = useCallback(() => {
+    setNodeMenu(null)
     setSelectedNodeId(null)
     useCanvasStore.getState().setEditingNodeId(null)
   }, [setSelectedNodeId])
 
   const onNodeDragStart = useCallback(() => {
+    setNodeMenu(null)
     takeSnapshot()
   }, [takeSnapshot])
 
@@ -231,6 +302,25 @@ export function FlowCanvas() {
     [drawingComment, drawStart, drawCurrent, addNode],
   )
 
+  useEffect(() => {
+    if (!nodeMenu) return
+
+    const handleWindowClick = () => setNodeMenu(null)
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNodeMenu(null)
+    }
+
+    window.addEventListener('click', handleWindowClick)
+    window.addEventListener('contextmenu', handleWindowClick)
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('click', handleWindowClick)
+      window.removeEventListener('contextmenu', handleWindowClick)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [nodeMenu])
+
   let previewRect: { left: number; top: number; width: number; height: number } | null = null
   if (drawingComment && drawStart && drawCurrent) {
     const instance = reactFlowInstance.current
@@ -266,6 +356,7 @@ export function FlowCanvas() {
         onConnect={onConnect}
         onInit={(instance) => { reactFlowInstance.current = instance }}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
@@ -296,6 +387,22 @@ export function FlowCanvas() {
         />
         <CanvasControls />
       </ReactFlow>
+      {nodeMenu && (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-lg"
+          style={{ left: nodeMenu.x, top: nodeMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <Button
+            variant="ghost"
+            className="h-8 w-full justify-start px-2 text-sm"
+            onClick={handleSetAsBegin}
+          >
+            Set as Begin
+          </Button>
+        </div>
+      )}
       {previewRect && (
         <div
           className="pointer-events-none absolute rounded-[12px] border-2 border-[#9B8E7B]"

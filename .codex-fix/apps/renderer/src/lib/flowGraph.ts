@@ -1,8 +1,8 @@
 ﻿import type { Connection, Edge, Node } from '@xyflow/react'
 import type { AnyNodeData } from '@/stores/canvasStore'
 
-type ExecNode = Node<AnyNodeData>
-type ExecNodeType = 'requestNode' | 'waitResponseNode'
+type FlowNode = Node<AnyNodeData>
+type FlowNodeType = 'beginNode' | 'requestNode' | 'waitResponseNode'
 export type WaitNodeMode = 'continue' | 'observe' | 'standalone'
 
 interface ValidationResult {
@@ -17,21 +17,27 @@ interface RequestTargets {
   plainWaitTargets: string[]
 }
 
+interface ExecutableFlowResult {
+  validation: ValidationResult
+  nodes: FlowNode[]
+  edges: Edge[]
+}
+
 function isExecEdge(edge: Edge): boolean {
   return edge.type === 'execEdge'
 }
 
-function isExecNodeType(type: string | undefined): type is ExecNodeType {
-  return type === 'requestNode' || type === 'waitResponseNode'
+function isFlowNodeType(type: string | undefined): type is FlowNodeType {
+  return type === 'beginNode' || type === 'requestNode' || type === 'waitResponseNode'
 }
 
-function buildNodeMap(nodes: ExecNode[]): Map<string, ExecNode> {
+function buildNodeMap(nodes: FlowNode[]): Map<string, FlowNode> {
   return new Map(
-    nodes.filter((node) => isExecNodeType(node.type)).map((node) => [node.id, node]),
+    nodes.filter((node) => isFlowNodeType(node.type)).map((node) => [node.id, node]),
   )
 }
 
-function buildAdjacency(nodes: ExecNode[], edges: Edge[]) {
+function buildAdjacency(nodes: FlowNode[], edges: Edge[]) {
   const nodeMap = buildNodeMap(nodes)
   const execEdges = edges
     .filter(isExecEdge)
@@ -52,26 +58,25 @@ function buildAdjacency(nodes: ExecNode[], edges: Edge[]) {
   return { nodeMap, execEdges, incoming, outgoing }
 }
 
-function getNodeLabel(nodeId: string, nodeMap: Map<string, ExecNode>): string {
+function getNodeLabel(nodeId: string, nodeMap: Map<string, FlowNode>): string {
   const node = nodeMap.get(nodeId)
   if (!node) return nodeId
 
-  if (node.type === 'requestNode' || node.type === 'waitResponseNode') {
-    const messageName = typeof node.data?.messageName === 'string' ? node.data.messageName : nodeId
-    const shortName = messageName.split('.').pop() || messageName
-    return `${shortName} (${nodeId})`
-  }
+  if (node.type === 'beginNode') return 'Begin'
 
-  return nodeId
+  const messageName = typeof node.data?.messageName === 'string' ? node.data.messageName : nodeId
+  const shortName = messageName.split('.').pop() || messageName
+  return `${shortName} (${nodeId})`
 }
 
-function formatNodeList(nodeIds: string[], nodeMap: Map<string, ExecNode>): string[] {
-  return nodeIds.map((nodeId) => getNodeLabel(nodeId, nodeMap))
+
+function getBeginNode(nodeMap: Map<string, FlowNode>): FlowNode | undefined {
+  return [...nodeMap.values()].find((node) => node.type === 'beginNode')
 }
 
 function getRequestTargets(
   requestId: string,
-  nodeMap: Map<string, ExecNode>,
+  nodeMap: Map<string, FlowNode>,
   outgoing: Map<string, string[]>,
 ): RequestTargets {
   const directRequestTargets: string[] = []
@@ -87,6 +92,8 @@ function getRequestTargets(
       continue
     }
 
+    if (target.type !== 'waitResponseNode') continue
+
     const waitOutgoing = outgoing.get(targetId) ?? []
     if (waitOutgoing.length === 0) {
       plainWaitTargets.push(targetId)
@@ -100,7 +107,7 @@ function getRequestTargets(
 
 function isObserverWait(
   waitId: string,
-  nodeMap: Map<string, ExecNode>,
+  nodeMap: Map<string, FlowNode>,
   incoming: Map<string, string[]>,
   outgoing: Map<string, string[]>,
 ): boolean {
@@ -122,11 +129,16 @@ function isObserverWait(
   return true
 }
 
-function validateStructuralRules(nodes: ExecNode[], edges: Edge[]): ValidationResult {
+function validateStructuralRules(nodes: FlowNode[], edges: Edge[]): ValidationResult {
   const { nodeMap, execEdges, incoming, outgoing } = buildAdjacency(nodes, edges)
 
-  if (nodeMap.size === 0) {
-    return { valid: false, error: 'Flow has no executable nodes.' }
+  const beginNodes = [...nodeMap.values()].filter((node) => node.type === 'beginNode')
+  if (beginNodes.length !== 1) {
+    return {
+      valid: false,
+      error: 'Canvas must contain exactly one Begin node.',
+      details: beginNodes.map((node) => node.id),
+    }
   }
 
   for (const edge of execEdges) {
@@ -138,6 +150,12 @@ function validateStructuralRules(nodes: ExecNode[], edges: Edge[]): ValidationRe
     const target = nodeMap.get(edge.target)
     if (!source || !target) continue
 
+    if (source.type === 'beginNode' && target.type !== 'requestNode') {
+      return { valid: false, error: 'Begin can only connect to a Cg node.' }
+    }
+    if (target.type === 'beginNode') {
+      return { valid: false, error: 'No node can connect into Begin.' }
+    }
     if (source.type === 'waitResponseNode' && target.type !== 'requestNode') {
       return { valid: false, error: 'Gc nodes can only continue to a Cg node.' }
     }
@@ -150,32 +168,49 @@ function validateStructuralRules(nodes: ExecNode[], edges: Edge[]): ValidationRe
     const nodeIncoming = incoming.get(nodeId) ?? []
     const nodeOutgoing = outgoing.get(nodeId) ?? []
 
-    if (node.type === 'waitResponseNode') {
-      if (nodeIncoming.length > 1) {
-        return { valid: false, error: 'Each Gc node can only have one parent Cg node.' }
+    if (node.type === 'beginNode') {
+      if (nodeIncoming.length > 0) {
+        return { valid: false, error: 'Begin cannot have incoming connections.' }
       }
       if (nodeOutgoing.length > 1) {
-        return { valid: false, error: 'Each Gc node can only continue to one Cg node.' }
-      }
-      if (nodeIncoming.length === 1 && nodeMap.get(nodeIncoming[0])?.type !== 'requestNode') {
-        return { valid: false, error: 'A Gc node must be attached to a Cg node.' }
-      }
-      if (nodeOutgoing.length === 1 && nodeMap.get(nodeOutgoing[0])?.type !== 'requestNode') {
-        return { valid: false, error: 'A Gc node can only continue to a Cg node.' }
+        return { valid: false, error: 'Begin can only select one executable chain.' }
       }
       continue
     }
 
-    const { directRequestTargets, continuingWaitTargets } = getRequestTargets(nodeId, nodeMap, outgoing)
+    if (node.type === 'requestNode') {
+      if (nodeIncoming.length > 1) {
+        return {
+          valid: false,
+          error: 'A Cg node can only have one incoming execution path.',
+          details: [getNodeLabel(nodeId, nodeMap)],
+        }
+      }
 
-    if (directRequestTargets.length > 1) {
-      return { valid: false, error: 'Each Cg node can only continue to one next Cg node.' }
+      const { directRequestTargets, continuingWaitTargets } = getRequestTargets(nodeId, nodeMap, outgoing)
+      if (directRequestTargets.length > 1) {
+        return { valid: false, error: 'Each Cg node can only continue to one next Cg node.' }
+      }
+      if (continuingWaitTargets.length > 1) {
+        return { valid: false, error: 'Each Cg node can only have one Gc branch that continues execution.' }
+      }
+      if (directRequestTargets.length > 0 && continuingWaitTargets.length > 0) {
+        return { valid: false, error: 'A Cg node cannot continue through both a direct Cg edge and a Gc branch.' }
+      }
+      continue
     }
-    if (continuingWaitTargets.length > 1) {
-      return { valid: false, error: 'Each Cg node can only have one Gc branch that continues execution.' }
+
+    if (nodeIncoming.length > 1) {
+      return { valid: false, error: 'Each Gc node can only have one parent Cg node.' }
     }
-    if (directRequestTargets.length > 0 && continuingWaitTargets.length > 0) {
-      return { valid: false, error: 'A Cg node cannot continue through both a direct Cg edge and a Gc branch.' }
+    if (nodeOutgoing.length > 1) {
+      return { valid: false, error: 'Each Gc node can only continue to one Cg node.' }
+    }
+    if (nodeIncoming.length === 1 && nodeMap.get(nodeIncoming[0])?.type !== 'requestNode') {
+      return { valid: false, error: 'A Gc node must be attached to a Cg node.' }
+    }
+    if (nodeOutgoing.length === 1 && nodeMap.get(nodeOutgoing[0])?.type !== 'requestNode') {
+      return { valid: false, error: 'A Gc node can only continue to a Cg node.' }
     }
   }
 
@@ -193,34 +228,93 @@ function validateStructuralRules(nodes: ExecNode[], edges: Edge[]): ValidationRe
   return { valid: true }
 }
 
-export function getWaitNodeMode(nodeId: string, nodes: ExecNode[], edges: Edge[]): WaitNodeMode {
-  const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
-  const node = nodeMap.get(nodeId)
-  if (!node || node.type !== 'waitResponseNode') return 'standalone'
-
-  if ((outgoing.get(nodeId) ?? []).length > 0) {
-    return 'continue'
-  }
-
-  if (isObserverWait(nodeId, nodeMap, incoming, outgoing)) {
-    return 'observe'
-  }
-
-  const parents = incoming.get(nodeId) ?? []
-  if (parents.length === 1 && nodeMap.get(parents[0])?.type === 'requestNode') {
-    return 'continue'
-  }
-
-  return 'standalone'
-}
-
-export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationResult {
+function collectReachableFromBegin(nodes: FlowNode[], edges: Edge[]): ExecutableFlowResult {
   const structural = validateStructuralRules(nodes, edges)
   if (!structural.valid) {
-    return structural
+    return { validation: structural, nodes: [], edges: [] }
   }
 
+  const { nodeMap, execEdges, outgoing } = buildAdjacency(nodes, edges)
+  const begin = getBeginNode(nodeMap)
+  if (!begin) {
+    return {
+      validation: { valid: false, error: 'Begin node is missing.' },
+      nodes: [],
+      edges: [],
+    }
+  }
+
+  const beginTargets = outgoing.get(begin.id) ?? []
+  if (beginTargets.length === 0) {
+    return {
+      validation: { valid: false, error: 'Begin is not connected to any Cg node.' },
+      nodes: [],
+      edges: [],
+    }
+  }
+
+  const reachable = new Set<string>()
+  const visiting = new Set<string>()
+  let cycleAt: string | null = null
+
+  const visit = (nodeId: string) => {
+    if (visiting.has(nodeId)) {
+      cycleAt = nodeId
+      return
+    }
+    if (reachable.has(nodeId) || cycleAt) return
+
+    visiting.add(nodeId)
+    reachable.add(nodeId)
+    for (const nextId of outgoing.get(nodeId) ?? []) {
+      visit(nextId)
+      if (cycleAt) return
+    }
+    visiting.delete(nodeId)
+  }
+
+  visit(begin.id)
+
+  if (cycleAt) {
+    return {
+      validation: {
+        valid: false,
+        error: `The selected chain contains a cycle at ${getNodeLabel(cycleAt, nodeMap)}.`,
+      },
+      nodes: [],
+      edges: [],
+    }
+  }
+
+  const selectedNodes = [...nodeMap.values()].filter(
+    (node) => reachable.has(node.id) && node.type !== 'beginNode',
+  )
+  const selectedNodeIds = new Set(selectedNodes.map((node) => node.id))
+  const selectedEdges = execEdges.filter(
+    (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target),
+  )
+
+  if (selectedNodes.length === 0) {
+    return {
+      validation: { valid: false, error: 'Begin does not point to an executable chain.' },
+      nodes: [],
+      edges: [],
+    }
+  }
+
+  return {
+    validation: { valid: true },
+    nodes: selectedNodes,
+    edges: selectedEdges,
+  }
+}
+
+function validateSelectedExecutableSubgraph(nodes: FlowNode[], edges: Edge[]): ValidationResult {
   const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
+  if (nodeMap.size === 0) {
+    return { valid: false, error: 'Begin does not point to an executable chain.' }
+  }
+
   const observerWaitIds = new Set<string>()
   const nextNodeById = new Map<string, string>()
 
@@ -282,37 +376,55 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
   }
 
   const starts = [...indegree.entries()].filter(([, degree]) => degree === 0).map(([nodeId]) => nodeId)
-  if (starts.length === 0) {
-    return { valid: false, error: 'No start node was found. The flow contains a cycle.' }
-  }
-  if (starts.length > 1) {
-    return {
-      valid: false,
-      error: 'The flow has multiple disconnected start nodes.',
-      details: formatNodeList(starts, nodeMap),
-    }
-  }
-
-  const visited = new Set<string>()
-  let currentId: string | undefined = starts[0]
-  while (currentId) {
-    if (visited.has(currentId)) {
-      return { valid: false, error: `The flow contains a cycle at ${getNodeLabel(currentId, nodeMap)}.` }
-    }
-    visited.add(currentId)
-    currentId = nextNodeById.get(currentId)
-  }
-
-  if (visited.size !== mainNodeIds.length) {
-    const unreachable = mainNodeIds.filter((nodeId) => !visited.has(nodeId))
-    return {
-      valid: false,
-      error: 'The flow contains executable nodes that are not connected to the main chain.',
-      details: formatNodeList(unreachable, nodeMap),
-    }
+  if (starts.length !== 1) {
+    return { valid: false, error: 'Begin must point to exactly one executable chain.' }
   }
 
   return { valid: true }
+}
+
+export function getWaitNodeMode(nodeId: string, nodes: FlowNode[], edges: Edge[]): WaitNodeMode {
+  const { nodeMap, incoming, outgoing } = buildAdjacency(nodes, edges)
+  const node = nodeMap.get(nodeId)
+  if (!node || node.type !== 'waitResponseNode') return 'standalone'
+
+  if ((outgoing.get(nodeId) ?? []).length > 0) {
+    return 'continue'
+  }
+
+  if (isObserverWait(nodeId, nodeMap, incoming, outgoing)) {
+    return 'observe'
+  }
+
+  const parents = incoming.get(nodeId) ?? []
+  if (parents.length === 1 && nodeMap.get(parents[0])?.type === 'requestNode') {
+    return 'continue'
+  }
+
+  return 'standalone'
+}
+
+export function validateFlowGraph(nodes: FlowNode[], edges: Edge[]): ValidationResult {
+  const selected = collectReachableFromBegin(nodes, edges)
+  if (!selected.validation.valid) {
+    return selected.validation
+  }
+
+  return validateSelectedExecutableSubgraph(selected.nodes, selected.edges)
+}
+
+export function getExecutableFlowFromBegin(nodes: FlowNode[], edges: Edge[]): ExecutableFlowResult {
+  const selected = collectReachableFromBegin(nodes, edges)
+  if (!selected.validation.valid) {
+    return selected
+  }
+
+  const validation = validateSelectedExecutableSubgraph(selected.nodes, selected.edges)
+  if (!validation.valid) {
+    return { validation, nodes: [], edges: [] }
+  }
+
+  return selected
 }
 
 export function formatValidationMessage(result: ValidationResult): string {
@@ -329,7 +441,7 @@ export function formatValidationMessage(result: ValidationResult): string {
   return `${result.error} Affected nodes: ${preview.join(', ')}${suffix}.`
 }
 
-export function validateExecConnection(connection: Connection, nodes: ExecNode[], edges: Edge[]): ValidationResult {
+export function validateExecConnection(connection: Connection, nodes: FlowNode[], edges: Edge[]): ValidationResult {
   if (!connection.source || !connection.target) {
     return { valid: false, error: 'Connection endpoints are incomplete.' }
   }
@@ -350,3 +462,4 @@ export function validateExecConnection(connection: Connection, nodes: ExecNode[]
 
   return validateStructuralRules(nodes, candidateEdges)
 }
+
