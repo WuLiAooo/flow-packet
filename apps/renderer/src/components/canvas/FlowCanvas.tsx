@@ -20,6 +20,8 @@ import '@xyflow/react/dist/style.css'
 import type { ColorMode, Node } from '@xyflow/react'
 import { toast } from 'sonner'
 import { useCanvasStore, type AnyNodeData } from '@/stores/canvasStore'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import { useTheme } from '@/hooks/use-theme'
 import { useProtoStore } from '@/stores/protoStore'
 import { validateExecConnection } from '@/lib/flowGraph'
@@ -31,6 +33,7 @@ import { WaitResponseNode } from './nodes/WaitResponseNode'
 import { CommentNode } from './nodes/CommentNode'
 import { ExecEdge } from './edges/ExecEdge'
 import { CanvasControls } from './CanvasControls'
+import { loginDeviceSession } from '@/services/api'
 
 const nodeTypes: NodeTypes = {
   beginNode: BeginNode,
@@ -45,6 +48,7 @@ const edgeTypes: EdgeTypes = {
 
 interface NodeMenuState {
   nodeId: string
+  nodeType: string
   x: number
   y: number
 }
@@ -67,6 +71,9 @@ export function FlowCanvas() {
   const addNode = useCanvasStore((s) => s.addNode)
   const removeNode = useCanvasStore((s) => s.removeNode)
   const routeMappings = useProtoStore((s) => s.routeMappings)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const connState = useConnectionStore((s) => s.state)
+  const clearSessionStatus = useSessionStatusStore((s) => s.clearStatus)
   const theme = useTheme((s) => s.theme)
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useRef<ReactFlowInstance<Node<AnyNodeData>> | null>(null)
@@ -126,7 +133,7 @@ export function FlowCanvas() {
 
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (node.type !== 'requestNode') {
+      if (node.type !== 'requestNode' && node.type !== 'beginNode') {
         setNodeMenu(null)
         return
       }
@@ -136,6 +143,7 @@ export function FlowCanvas() {
       setSelectedNodeId(node.id)
       setNodeMenu({
         nodeId: node.id,
+        nodeType: node.type ?? '',
         x: event.clientX,
         y: event.clientY,
       })
@@ -171,9 +179,49 @@ export function FlowCanvas() {
     toast.success('Begin target updated')
   }, [edges, nodeMenu, nodes, takeSnapshot, updateEdges])
 
+  const handleBeginLogin = useCallback(async () => {
+    if (!nodeMenu || nodeMenu.nodeType !== 'beginNode') return
+    if (!activeConnectionId) {
+      setNodeMenu(null)
+      toast.error('No active connection')
+      return
+    }
+    if (connState !== 'connected') {
+      setNodeMenu(null)
+      toast.error('Connection unavailable', {
+        description: 'Connect to the server first before logging in this BeginNode.',
+      })
+      return
+    }
+
+    const beginNode = nodes.find((node) => node.id === nodeMenu.nodeId && node.type === 'beginNode')
+    const deviceId = typeof beginNode?.data?.deviceId === 'string' ? beginNode.data.deviceId.trim() : ''
+    if (!deviceId) {
+      setNodeMenu(null)
+      toast.error('Begin deviceId required', {
+        description: 'Double-click BeginNode and configure the deviceId before login.',
+      })
+      return
+    }
+
+    clearSessionStatus(activeConnectionId, deviceId)
+
+    try {
+      await loginDeviceSession(activeConnectionId, deviceId)
+      toast.success('Begin session ready', {
+        description: `deviceId: ${deviceId}`,
+      })
+    } catch (err) {
+      toast.error('Begin login failed', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setNodeMenu(null)
+    }
+  }, [activeConnectionId, clearSessionStatus, connState, nodeMenu, nodes])
+
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (node.type === 'beginNode') return
       useCanvasStore.getState().setEditingNodeId(node.id)
     },
     [],
@@ -389,18 +437,29 @@ export function FlowCanvas() {
       </ReactFlow>
       {nodeMenu && (
         <div
-          className="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-lg"
+          className="fixed z-50 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-lg"
           style={{ left: nodeMenu.x, top: nodeMenu.y }}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <Button
-            variant="ghost"
-            className="h-8 w-full justify-start px-2 text-sm"
-            onClick={handleSetAsBegin}
-          >
-            Set as Begin
-          </Button>
+          {nodeMenu.nodeType === 'requestNode' && (
+            <Button
+              variant="ghost"
+              className="h-8 w-full justify-start px-2 text-sm"
+              onClick={handleSetAsBegin}
+            >
+              Set as Begin
+            </Button>
+          )}
+          {nodeMenu.nodeType === 'beginNode' && (
+            <Button
+              variant="ghost"
+              className="h-8 w-full justify-start px-2 text-sm"
+              onClick={() => void handleBeginLogin()}
+            >
+              Login
+            </Button>
+          )}
         </div>
       )}
       {previewRect && (
@@ -418,3 +477,4 @@ export function FlowCanvas() {
     </div>
   )
 }
+

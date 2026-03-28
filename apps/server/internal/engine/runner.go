@@ -372,7 +372,7 @@ func (r *Runner) Execute(ctx context.Context, nodes []FlowNode, edges []FlowEdge
 	r.running = true
 	execCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
-	r.seqCtx.Reset()
+	r.seqCtx.ClearPending()
 	r.resetIncomingPackets()
 	r.resetObserverWaits()
 	r.setNodeCallback(onNode)
@@ -442,6 +442,23 @@ func (r *Runner) Stop() {
 	}
 	r.resetObserverWaits()
 	r.setNodeCallback(nil)
+}
+
+func (r *Runner) HandleIncomingPacket(pkt *codec.Packet) bool {
+	if pkt == nil {
+		return false
+	}
+	if r.seqCtx.Resolve(pkt.Seq, pkt.Data) {
+		return true
+	}
+	if r.seqCtx.ResolveFirst(pkt.Data) {
+		return true
+	}
+	if r.Running() || r.hasActiveObserverWaits() {
+		r.PushIncomingPacket(pkt)
+		return true
+	}
+	return false
 }
 
 func (r *Runner) PushIncomingPacket(pkt *codec.Packet) {
@@ -698,6 +715,29 @@ func (r *Runner) resolveIncomingMessageName(route uint32, stringRoute string) st
 		return ""
 	}
 	return r.incomingNameResolver(route, stringRoute)
+}
+
+func (r *Runner) DecodeIncomingPacket(pkt *codec.Packet) (string, map[string]any, error) {
+	if pkt == nil {
+		return "", nil, fmt.Errorf("packet is nil")
+	}
+	if r.decoder == nil {
+		return "", nil, fmt.Errorf("message decoder not configured")
+	}
+
+	messageName := r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute)
+	if messageName == "" {
+		messageName = r.resolveExpectedResponseName(pkt.Route, pkt.StringRoute)
+	}
+	if messageName == "" {
+		return "", nil, fmt.Errorf("response message name is empty")
+	}
+
+	payload, err := r.decoder(messageName, pkt.Data)
+	if err != nil {
+		return messageName, nil, err
+	}
+	return messageName, payload, nil
 }
 
 func (r *Runner) resetIncomingPackets() {

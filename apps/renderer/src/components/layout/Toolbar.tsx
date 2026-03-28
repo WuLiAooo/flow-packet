@@ -6,7 +6,8 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { executeFlow, connectTCP } from '@/services/api'
-import { useCanvasStore } from '@/stores/canvasStore'
+import { useSessionStatusStore } from '@/stores/sessionStatusStore'
+import { useCanvasStore, type BeginNodeData } from '@/stores/canvasStore'
 import { formatValidationMessage, getExecutableFlowFromBegin } from '@/lib/flowGraph'
 import { toast } from 'sonner'
 
@@ -35,6 +36,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
   const getConnection = useSavedConnectionStore((s) => s.getConnection)
+  const getSessionStatus = useSessionStatusStore((s) => s.getStatus)
 
   const isConnected = connState === 'connected'
   const isDisconnected = connState === 'disconnected'
@@ -53,6 +55,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
     try {
       await connectTCP(connection.host, connection.port, {
+        connectionId: activeConnectionId,
         protocol: connection.protocol,
         timeout: connectTimeout,
         reconnect: true,
@@ -73,6 +76,24 @@ export function Toolbar({ onBack }: ToolbarProps) {
 
   const handleRun = async () => {
     if (!isConnected || execStatus === 'running' || nodes.length === 0 || !activeConnectionId) return
+
+    const beginNode = nodes.find((node) => node.type === 'beginNode')
+    const beginData = beginNode?.data as BeginNodeData | undefined
+    const deviceId = typeof beginData?.deviceId === 'string' ? beginData.deviceId.trim() : ''
+    if (!deviceId) {
+      toast.error('Begin deviceId required', {
+        description: 'Double-click BeginNode and configure the deviceId before running this chain.',
+      })
+      return
+    }
+
+    const sessionStatus = getSessionStatus(activeConnectionId, deviceId)
+    if (sessionStatus?.state !== 'ready') {
+      toast.error('Begin session not ready', {
+        description: 'Right-click BeginNode and choose Login before running this chain.',
+      })
+      return
+    }
 
     const executable = getExecutableFlowFromBegin(nodes, edges)
     if (!executable.validation.valid) {
@@ -104,7 +125,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
         }
       })
       const flowEdges = executable.edges.map((edge) => ({ source: edge.source, target: edge.target }))
-      await executeFlow(flowNodes, flowEdges, activeConnectionId)
+      await executeFlow(flowNodes, flowEdges, activeConnectionId, deviceId)
     } catch {
       // handled by event
     }
@@ -161,3 +182,6 @@ export function Toolbar({ onBack }: ToolbarProps) {
     </div>
   )
 }
+
+
+

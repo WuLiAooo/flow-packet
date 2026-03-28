@@ -1,4 +1,4 @@
-import { subscribe } from './ws'
+﻿import { subscribe } from './ws'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
@@ -39,33 +39,6 @@ export function initEventBindings(): () => void {
     })
   )
 
-  unsubs.push(
-    subscribe('packet.received', (payload) => {
-      const data = payload as {
-        connectionId: string
-        deviceId?: string
-        source?: string
-        route?: number
-        stringRoute?: string
-        seq?: number
-        messageName?: string
-        data?: Record<string, unknown>
-      }
-      const store = useExecutionStore.getState()
-      const scope = data.deviceId
-        ? `session:${data.deviceId}`
-        : (data.source === 'connection' ? 'server' : 'wire')
-
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        nodeId: scope,
-        type: 'response',
-        messageName: data.messageName || data.stringRoute || (data.route ? String(data.route) : undefined),
-        data: data.data ?? {},
-      })
-    })
-  )
   unsubs.push(
     subscribe('node.result', (payload) => {
       const data = payload as {
@@ -190,5 +163,3 @@ export function initEventBindings(): () => void {
     unsubs.forEach((unsub) => unsub())
   }
 }
-
-

@@ -4,11 +4,13 @@ import { Card } from '@/components/ui/card'
 import type { BeginNodeData } from '@/stores/canvasStore'
 
 export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
+  const deviceId = (data.deviceId || '').trim()
+
   return (
     <Card
       className={selected ? 'rounded-[14px] border-primary ring-1 ring-primary' : 'rounded-[14px]'}
       style={{
-        minWidth: 130,
+        minWidth: 188,
         borderWidth: 1,
         background: 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(59,130,246,0.14))',
       }}
@@ -20,6 +22,9 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Entry</div>
           <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {deviceId || 'Double-click to set deviceId'}
+          </div>
         </div>
       </div>
 

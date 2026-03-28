@@ -10,6 +10,7 @@ import { TitleBar } from '@/components/layout/TitleBar'
 import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
 import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
 import { FlowCanvas } from '@/components/canvas/FlowCanvas'
+import { DeviceSessionStatusPanel } from '@/components/canvas/DeviceSessionStatusPanel'
 import { PropertySheet } from '@/components/editor/PropertySheet'
 import { LogPanel } from '@/components/execution/LogPanel'
 import { WelcomePage } from '@/components/connection/WelcomePage'
@@ -24,6 +25,7 @@ import { useProtoStore } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useCollectionStore } from '@/stores/collectionStore'
+import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import type { SavedConnection } from '@/stores/savedConnectionStore'
 
 function unlockBodyInteraction() {
@@ -136,6 +138,7 @@ function App() {
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
     useConnectionStore.getState().setState('disconnected')
+    useSessionStatusStore.getState().clearConnection(connection.id)
 
     setConfig({
       host: connection.host,
@@ -175,6 +178,7 @@ function App() {
 
     useConnectionStore.getState().setState('connecting')
     withTimeout(connectTCP(connection.host, connection.port, {
+      connectionId: connection.id,
       protocol: connection.protocol,
       timeout: connectTimeout,
       reconnect: true,
@@ -202,6 +206,7 @@ function App() {
     setActiveConnectionId(null)
     useTabStore.getState().resetTabs()
     useCollectionStore.getState().clearCollections()
+    useSessionStatusStore.getState().clearAll()
   }, [setActiveConnectionId, setFiles, setMessages, setRouteMappings])
 
   if (!activeConnectionId) {
@@ -243,7 +248,10 @@ function App() {
                 tabs={<CanvasTabs />}
                 center={
                   activeTabId ? (
-                    <FlowCanvas />
+                    <>
+                      <FlowCanvas />
+                      <DeviceSessionStatusPanel />
+                    </>
                   ) : (
                     <div
                       className="flex h-full flex-col items-center justify-center text-muted-foreground"

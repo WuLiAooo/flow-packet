@@ -7,21 +7,27 @@ import (
 	"time"
 )
 
-// SeqContext seq ��������Ӧƥ��
+// SeqContext tracks transport sequences and pending response waiters.
 type SeqContext struct {
 	mu      sync.Mutex
 	counter uint32
 	pending map[uint32]chan []byte
 }
 
-// NewSeqContext ���� seq ������
+// NewSeqContext creates a sequence context with a zero-valued counter.
 func NewSeqContext() *SeqContext {
+	return NewSeqContextWithCounter(0)
+}
+
+// NewSeqContextWithCounter creates a sequence context with an initial counter value.
+func NewSeqContextWithCounter(counter uint32) *SeqContext {
 	return &SeqContext{
+		counter: counter,
 		pending: make(map[uint32]chan []byte),
 	}
 }
 
-// NextSeq ������һ�� seq ��ע��ȴ�ͨ��
+// NextSeq allocates the next sequence and tracks its response channel.
 func (c *SeqContext) NextSeq() (uint32, chan []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -42,7 +48,7 @@ func (c *SeqContext) NextSeqValue() uint32 {
 	return c.counter
 }
 
-// Resolve �յ���Ӧ��, ͨ�� seq ƥ�䵽�ȴ���
+// Resolve delivers a response to a specific waiting sequence.
 func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	c.mu.Lock()
 	ch, ok := c.pending[seq]
@@ -59,8 +65,7 @@ func (c *SeqContext) Resolve(seq uint32, data []byte) bool {
 	return true
 }
 
-// ResolveFirst �� seq �޷���ȷƥ��ʱ, ��������ĵȴ�����
-// �����ڷ���˲��ش� seq ��Э��(��Ӧ seq=0)
+// ResolveFirst falls back to the earliest pending waiter when the sequence is missing.
 func (c *SeqContext) ResolveFirst(data []byte) bool {
 	c.mu.Lock()
 	var minSeq uint32
@@ -84,7 +89,7 @@ func (c *SeqContext) ResolveFirst(data []byte) bool {
 	return true
 }
 
-// WaitResponse �ȴ�ָ�� seq ����Ӧ, ��ʱ���ش���
+// WaitResponse waits for a response until timeout.
 func (c *SeqContext) WaitResponse(ch chan []byte, timeout time.Duration) ([]byte, error) {
 	return c.WaitResponseContext(context.Background(), ch, timeout)
 }
@@ -104,13 +109,35 @@ func (c *SeqContext) WaitResponseContext(ctx context.Context, ch chan []byte, ti
 	}
 }
 
-// Reset ����������
-func (c *SeqContext) Reset() {
+// ClearPending removes all pending waiters while preserving the current counter.
+func (c *SeqContext) ClearPending() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.counter = 0
 	for seq, ch := range c.pending {
 		close(ch)
 		delete(c.pending, seq)
 	}
+}
+
+// SetCounter updates the internal sequence counter.
+func (c *SeqContext) SetCounter(counter uint32) {
+	c.mu.Lock()
+	c.counter = counter
+	c.mu.Unlock()
+}
+
+// ResetTo clears pending waiters and resets the counter to the provided value.
+func (c *SeqContext) ResetTo(counter uint32) {
+	c.mu.Lock()
+	c.counter = counter
+	for seq, ch := range c.pending {
+		close(ch)
+		delete(c.pending, seq)
+	}
+	c.mu.Unlock()
+}
+
+// Reset clears all waiters and resets the counter to zero.
+func (c *SeqContext) Reset() {
+	c.ResetTo(0)
 }

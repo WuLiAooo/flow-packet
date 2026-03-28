@@ -3,6 +3,7 @@ import type { Node, Edge } from '@xyflow/react'
 
 export interface BeginNodeData {
   label: string
+  deviceId: string
   [key: string]: unknown
 }
 
@@ -44,7 +45,7 @@ export function createBeginNode(): Node<AnyNodeData> {
     id: `begin_${Date.now()}`,
     type: 'beginNode',
     position: { x: 120, y: 180 },
-    data: { label: BEGIN_LABEL },
+    data: { label: BEGIN_LABEL, deviceId: '' },
     draggable: true,
     selectable: true,
   }
@@ -55,12 +56,16 @@ function isBeginNode(node: Node<AnyNodeData>): boolean {
 }
 
 function normalizeBeginNode(node: Node<AnyNodeData>): Node<AnyNodeData> {
+  const rawData = (typeof node.data === 'object' && node.data ? node.data : {}) as Record<string, unknown>
+  const deviceId = typeof rawData['deviceId'] === 'string' ? String(rawData['deviceId']) : ''
+
   return {
     ...node,
     type: 'beginNode',
     data: {
-      ...(typeof node.data === 'object' && node.data ? node.data : {}),
+      ...rawData,
       label: BEGIN_LABEL,
+      deviceId,
     },
   }
 }
@@ -162,7 +167,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   setEditingNodeId: (id) => set({ editingNodeId: id }),
   updateNodeData: (nodeId, data) => {
     const node = get().nodes.find((item) => item.id === nodeId)
-    if (!node || isBeginNode(node)) return
+    if (!node) return
 
     get().takeSnapshot()
     set((s) => ({
@@ -189,3 +194,5 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     }))
   },
 }))
+
+

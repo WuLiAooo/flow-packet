@@ -1,5 +1,7 @@
-﻿import { useCanvasStore, type CommentNodeData } from '@/stores/canvasStore'
+import { useCanvasStore, type BeginNodeData, type CommentNodeData } from '@/stores/canvasStore'
 import { FieldEditor } from './FieldEditor'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import { WaitResponseEditor } from './WaitResponseEditor'
 import { RuntimeDataViewer } from './RuntimeDataViewer'
 import { Input } from '@/components/ui/input'
@@ -16,6 +18,40 @@ import {
 } from '@/components/ui/sheet'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
+
+function BeginEditor({ nodeId }: { nodeId: string }) {
+  const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const clearStatus = useSessionStatusStore((s) => s.clearStatus)
+
+  if (!node || node.type !== 'beginNode') return null
+  const data = node.data as BeginNodeData
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-2">
+        <Label htmlFor={`begin-device-${nodeId}`}>deviceId</Label>
+        <Input
+          id={`begin-device-${nodeId}`}
+          value={data.deviceId ?? ''}
+          onChange={(e) => {
+            const nextDeviceId = e.target.value
+            if (activeConnectionId && nextDeviceId.trim()) {
+              clearStatus(activeConnectionId, nextDeviceId.trim())
+            }
+            updateNodeData(nodeId, { deviceId: nextDeviceId })
+          }}
+          placeholder="Enter deviceId for this chain"
+          autoFocus
+        />
+        <div className="text-xs text-muted-foreground">
+          Run will reuse or create a business session based on this deviceId.
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function CommentEditor({ nodeId }: { nodeId: string }) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
@@ -57,6 +93,7 @@ export function PropertySheet() {
     s.editingNodeId ? s.nodes.find((n) => n.id === s.editingNodeId) : null
   )
 
+  const isBegin = editingNode?.type === 'beginNode'
   const isComment = editingNode?.type === 'commentNode'
   const isWaitResponse = editingNode?.type === 'waitResponseNode'
   const canShowRuntime = editingNode?.type === 'requestNode' || editingNode?.type === 'waitResponseNode'
@@ -71,23 +108,33 @@ export function PropertySheet() {
       <SheetContent side="right" className="w-[420px] sm:max-w-[420px]" showCloseButton={false}>
         <SheetHeader>
           <SheetTitle className="text-sm">
-            {isComment ? 'Comment Properties' : isWaitResponse ? 'Wait Node Properties' : 'Node Properties'}
+            {isBegin
+              ? 'Begin Properties'
+              : isComment
+                ? 'Comment Properties'
+                : isWaitResponse
+                  ? 'Wait Node Properties'
+                  : 'Node Properties'}
           </SheetTitle>
           <SheetDescription className="text-xs">
-            {isComment
-              ? 'Edit the note title and color.'
-              : isWaitResponse
-                ? 'Configure the expected Gc message and inspect the latest runtime payload.'
-                : 'Edit request fields and inspect the latest runtime payload.'}
+            {isBegin
+              ? 'Configure the deviceId used to create or reuse the business session for this chain.'
+              : isComment
+                ? 'Edit the note title and color.'
+                : isWaitResponse
+                  ? 'Configure the expected Gc message and inspect the latest runtime payload.'
+                  : 'Edit request fields and inspect the latest runtime payload.'}
           </SheetDescription>
         </SheetHeader>
         <div className="grid flex-1 auto-rows-min gap-6 overflow-y-auto px-4">
           {editingNodeId && (
-            isComment
-              ? <CommentEditor nodeId={editingNodeId} />
-              : isWaitResponse
-                ? <WaitResponseEditor nodeId={editingNodeId} />
-                : <FieldEditor nodeId={editingNodeId} />
+            isBegin
+              ? <BeginEditor nodeId={editingNodeId} />
+              : isComment
+                ? <CommentEditor nodeId={editingNodeId} />
+                : isWaitResponse
+                  ? <WaitResponseEditor nodeId={editingNodeId} />
+                  : <FieldEditor nodeId={editingNodeId} />
           )}
           {canShowRuntime && editingNodeId && (
             <>
@@ -114,3 +161,4 @@ export function PropertySheet() {
     </Sheet>
   )
 }
+
