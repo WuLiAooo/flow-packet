@@ -1,6 +1,8 @@
-﻿import { useCallback, useMemo, useState } from 'react'
-import { Check, ChevronRight, Copy } from 'lucide-react'
+﻿import { useCallback, useDeferredValue, useMemo, useState } from 'react'
+import { Check, ChevronRight, Copy, Search, Trash2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useExecutionStore, type LogEntry } from '@/stores/executionStore'
 
@@ -22,19 +24,66 @@ const COLLAPSE_THRESHOLD = 160
 
 export function LogPanel() {
   const logs = useExecutionStore((s) => s.logs)
+  const clearLogs = useExecutionStore((s) => s.clearLogs)
+  const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query.trim().toLowerCase())
+
+  const filteredLogs = useMemo(() => {
+    if (!deferredQuery) return logs
+    return logs.filter((log) => matchesLog(log, deferredQuery))
+  }, [logs, deferredQuery])
 
   return (
-    <ScrollArea className="h-full">
-      <div className="font-mono text-[11px]" style={{ padding: '8px 8px 8px 22px' }}>
-        <div className="mb-2 text-[10px] text-muted-foreground">Log buffer keeps the latest 200 entries.</div>
-        {logs.length === 0 && (
-          <div className="text-muted-foreground">Waiting for execution...</div>
-        )}
-        {logs.map((log) => (
-          <LogRow key={log.id} log={log} />
-        ))}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2 font-mono text-[11px]">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search logs, messages, payloads"
+            className="h-7 pr-7 pl-7 font-mono text-[11px]"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+              title="Clear search"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {filteredLogs.length}/{logs.length}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={clearLogs}
+          disabled={logs.length === 0}
+        >
+          <Trash2 className="size-3" />
+          Clear
+        </Button>
       </div>
-    </ScrollArea>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="font-mono text-[11px]" style={{ padding: '8px 8px 8px 22px' }}>
+          <div className="mb-2 text-[10px] text-muted-foreground">Log buffer keeps the latest 200 entries.</div>
+          {logs.length === 0 && (
+            <div className="text-muted-foreground">Waiting for execution...</div>
+          )}
+          {logs.length > 0 && filteredLogs.length === 0 && (
+            <div className="text-muted-foreground">No logs match the current search.</div>
+          )}
+          {filteredLogs.map((log) => (
+            <LogRow key={log.id} log={log} />
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
   )
 }
 
@@ -203,4 +252,15 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+function matchesLog(log: LogEntry, query: string): boolean {
+  if (!query) return true
+  const haystack = [
+    log.nodeId,
+    log.type,
+    log.messageName ?? '',
+    safeStringify(log.data),
+  ].join(' ').toLowerCase()
+  return haystack.includes(query)
 }

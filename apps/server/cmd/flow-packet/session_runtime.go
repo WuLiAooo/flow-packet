@@ -128,6 +128,7 @@ func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *
 func (s *flowSession) handleReceive(_ network.Conn, data []byte) {
 	pkt, err := codec.DecodeBytes(data, s.config.PacketConfig)
 	if err != nil {
+		s.setState("error", err.Error())
 		return
 	}
 	if pkt.IsHeartbeat() {

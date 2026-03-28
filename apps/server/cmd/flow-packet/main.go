@@ -134,15 +134,26 @@ func main() {
 	onConnect := func(conn network.Conn) {
 		hb.Start()
 		srv.Broadcast(api.ServerMessage{
-			Event:   "conn.status",
-			Payload: map[string]any{"state": "connected", "addr": conn.RemoteAddr().String()},
+			Event: "conn.status",
+			Payload: map[string]any{
+				"connectionId": activeConnectionID,
+				"state":        "connected",
+				"addr":         conn.RemoteAddr().String(),
+			},
 		})
 	}
-	onDisconnect := func(_ network.Conn, _ error) {
+	onDisconnect := func(_ network.Conn, err error) {
 		hb.Stop()
+		payload := map[string]any{
+			"connectionId": activeConnectionID,
+			"state":        "disconnected",
+		}
+		if err != nil {
+			payload["error"] = err.Error()
+		}
 		srv.Broadcast(api.ServerMessage{
 			Event:   "conn.status",
-			Payload: map[string]any{"state": "disconnected"},
+			Payload: payload,
 		})
 	}
 

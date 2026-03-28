@@ -1,14 +1,33 @@
-import { subscribe } from './ws'
+﻿import { subscribe } from './ws'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
+
+function appendLog(entry: {
+  nodeId: string
+  type: 'request' | 'response' | 'error' | 'info'
+  messageName?: string
+  data: Record<string, unknown>
+  duration?: number
+}) {
+  useExecutionStore.getState().addLog({
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    ...entry,
+  })
+}
 
 export function initEventBindings(): () => void {
   const unsubs: (() => void)[] = []
 
   unsubs.push(
     subscribe('conn.status', (payload) => {
-      const data = payload as { state: string; addr?: string }
+      const data = payload as {
+        connectionId?: string
+        state: string
+        addr?: string
+        error?: string
+      }
       const store = useConnectionStore.getState()
       if (data.state === 'connected') {
         store.setState('connected')
@@ -18,6 +37,17 @@ export function initEventBindings(): () => void {
       } else if (data.state === 'reconnecting') {
         store.setState('reconnecting')
       }
+
+      appendLog({
+        nodeId: data.connectionId ? `connection:${data.connectionId}` : 'connection',
+        type: data.error ? 'error' : 'info',
+        messageName: 'conn.status',
+        data: {
+          state: data.state,
+          ...(data.addr ? { addr: data.addr } : {}),
+          ...(data.error ? { error: data.error } : {}),
+        },
+      })
     })
   )
 
@@ -36,6 +66,17 @@ export function initEventBindings(): () => void {
         state: data.state,
         error: data.error,
       })
+
+      appendLog({
+        nodeId: `session:${data.deviceId}`,
+        type: data.error || data.state === 'error' ? 'error' : 'info',
+        messageName: 'session.status',
+        data: {
+          state: data.state,
+          connectionId: data.connectionId,
+          ...(data.error ? { error: data.error } : {}),
+        },
+      })
     })
   )
 
@@ -51,14 +92,11 @@ export function initEventBindings(): () => void {
         messageName?: string
         data?: Record<string, unknown>
       }
-      const store = useExecutionStore.getState()
       const scope = data.deviceId
         ? `session:${data.deviceId}`
         : (data.source === 'connection' ? 'server' : 'wire')
 
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
+      appendLog({
         nodeId: scope,
         type: 'response',
         messageName: data.messageName || data.stringRoute || (data.route ? String(data.route) : undefined),
@@ -66,6 +104,7 @@ export function initEventBindings(): () => void {
       })
     })
   )
+
   unsubs.push(
     subscribe('node.result', (payload) => {
       const data = payload as {
@@ -84,9 +123,7 @@ export function initEventBindings(): () => void {
       })
 
       if (data.requestMsg || data.request) {
-        store.addLog({
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
+        appendLog({
           nodeId: data.nodeId,
           type: 'request',
           messageName: data.requestMsg,
@@ -95,9 +132,7 @@ export function initEventBindings(): () => void {
       }
 
       if (data.response !== undefined) {
-        store.addLog({
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
+        appendLog({
           nodeId: data.nodeId,
           type: 'response',
           messageName: data.responseMsg,
@@ -125,9 +160,7 @@ export function initEventBindings(): () => void {
         error: data.error,
       })
 
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
+      appendLog({
         nodeId: data.nodeId,
         type: 'error',
         data: { error: data.error },
@@ -145,9 +178,7 @@ export function initEventBindings(): () => void {
         status: 'running',
       })
 
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
+      appendLog({
         nodeId: data.nodeId,
         type: 'info',
         data: { message: 'executing' },
@@ -176,9 +207,7 @@ export function initEventBindings(): () => void {
       const data = payload as { error: string }
       const store = useExecutionStore.getState()
       store.setStatus('error')
-      store.addLog({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
+      appendLog({
         nodeId: 'flow',
         type: 'error',
         data: { error: data.error },
@@ -190,5 +219,3 @@ export function initEventBindings(): () => void {
     unsubs.forEach((unsub) => unsub())
   }
 }
-
-
