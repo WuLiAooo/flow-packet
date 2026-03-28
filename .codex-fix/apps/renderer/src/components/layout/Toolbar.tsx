@@ -7,7 +7,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
 import { executeFlow, connectTCP } from '@/services/api'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { validateFlowGraph } from '@/lib/flowGraph'
+import { formatValidationMessage, validateFlowGraph } from '@/lib/flowGraph'
 import { toast } from 'sonner'
 
 const stateColors: Record<string, string> = {
@@ -77,7 +77,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
     const validation = validateFlowGraph(nodes, edges)
     if (!validation.valid) {
       toast.error('Invalid flow', {
-        description: validation.error,
+        description: formatValidationMessage(validation),
       })
       return
     }

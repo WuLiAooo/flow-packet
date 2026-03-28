@@ -8,6 +8,7 @@ export type WaitNodeMode = 'continue' | 'observe' | 'standalone'
 interface ValidationResult {
   valid: boolean
   error?: string
+  details?: string[]
 }
 
 interface RequestTargets {
@@ -49,6 +50,23 @@ function buildAdjacency(nodes: ExecNode[], edges: Edge[]) {
   })
 
   return { nodeMap, execEdges, incoming, outgoing }
+}
+
+function getNodeLabel(nodeId: string, nodeMap: Map<string, ExecNode>): string {
+  const node = nodeMap.get(nodeId)
+  if (!node) return nodeId
+
+  if (node.type === 'requestNode' || node.type === 'waitResponseNode') {
+    const messageName = typeof node.data?.messageName === 'string' ? node.data.messageName : nodeId
+    const shortName = messageName.split('.').pop() || messageName
+    return `${shortName} (${nodeId})`
+  }
+
+  return nodeId
+}
+
+function formatNodeList(nodeIds: string[], nodeMap: Map<string, ExecNode>): string[] {
+  return nodeIds.map((nodeId) => getNodeLabel(nodeId, nodeMap))
 }
 
 function getRequestTargets(
@@ -254,7 +272,11 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
     if (!indegree.has(sourceId) || !indegree.has(targetId)) continue
     const nextDegree = (indegree.get(targetId) ?? 0) + 1
     if (nextDegree > 1) {
-      return { valid: false, error: 'A Cg node cannot have multiple incoming execution paths.' }
+      return {
+        valid: false,
+        error: 'A Cg node cannot have multiple incoming execution paths.',
+        details: [getNodeLabel(targetId, nodeMap)],
+      }
     }
     indegree.set(targetId, nextDegree)
   }
@@ -264,24 +286,47 @@ export function validateFlowGraph(nodes: ExecNode[], edges: Edge[]): ValidationR
     return { valid: false, error: 'No start node was found. The flow contains a cycle.' }
   }
   if (starts.length > 1) {
-    return { valid: false, error: 'The flow must have exactly one start node.' }
+    return {
+      valid: false,
+      error: 'The flow has multiple disconnected start nodes.',
+      details: formatNodeList(starts, nodeMap),
+    }
   }
 
   const visited = new Set<string>()
   let currentId: string | undefined = starts[0]
   while (currentId) {
     if (visited.has(currentId)) {
-      return { valid: false, error: `The flow contains a cycle at node ${currentId}.` }
+      return { valid: false, error: `The flow contains a cycle at ${getNodeLabel(currentId, nodeMap)}.` }
     }
     visited.add(currentId)
     currentId = nextNodeById.get(currentId)
   }
 
   if (visited.size !== mainNodeIds.length) {
-    return { valid: false, error: 'The flow contains disconnected executable nodes.' }
+    const unreachable = mainNodeIds.filter((nodeId) => !visited.has(nodeId))
+    return {
+      valid: false,
+      error: 'The flow contains executable nodes that are not connected to the main chain.',
+      details: formatNodeList(unreachable, nodeMap),
+    }
   }
 
   return { valid: true }
+}
+
+export function formatValidationMessage(result: ValidationResult): string {
+  if (result.valid) return ''
+  if (!result.details || result.details.length === 0) {
+    return result.error ?? 'Flow validation failed.'
+  }
+
+  const preview = result.details.slice(0, 5)
+  const suffix = result.details.length > preview.length
+    ? `, and ${result.details.length - preview.length} more`
+    : ''
+
+  return `${result.error} Affected nodes: ${preview.join(', ')}${suffix}.`
 }
 
 export function validateExecConnection(connection: Connection, nodes: ExecNode[], edges: Edge[]): ValidationResult {
