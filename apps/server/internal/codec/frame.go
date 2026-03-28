@@ -567,7 +567,14 @@ func (d *Decoder) decodeFieldDriven() (*Packet, error) {
 	}, nil
 }
 
-const topHeroHeaderSize = 10
+const (
+	topHeroHeaderSize         = 10
+	topHeroFlagVerifySequence = 1
+	topHeroFlagCrypto         = 1 << 14
+	topHeroFlagCompressed     = 1 << 15
+	topHeroCompressMethodNone = 0
+	topHeroCompressMethodLZ4  = 1
+)
 
 func topHeroEncode(pkt *Packet, cfg *TopHeroConfig) ([]byte, error) {
 	if pkt.Route > 0xFFFF {
@@ -579,7 +586,7 @@ func topHeroEncode(pkt *Packet, cfg *TopHeroConfig) ([]byte, error) {
 
 	flag := uint16(0)
 	if cfg == nil || cfg.VerifySequence {
-		flag = 1
+		flag = topHeroFlagVerifySequence
 	}
 
 	buf := make([]byte, topHeroHeaderSize+len(pkt.Data))
@@ -601,21 +608,17 @@ func topHeroDecodeBytes(data []byte, cfg *TopHeroConfig) (*Packet, error) {
 	if len(data) < topHeroHeaderSize+bodyLen {
 		return nil, fmt.Errorf("incomplete packet: need %d bytes, have %d", topHeroHeaderSize+bodyLen, len(data))
 	}
-	if flag&(1<<15) != 0 {
-		return nil, errors.New("tophero compressed payload is not supported yet")
-	}
-	if flag&(1<<14) != 0 {
-		return nil, errors.New("tophero encrypted payload is not supported yet")
+
+	body, err := decodeTopHeroPayload(flag, data[topHeroHeaderSize:topHeroHeaderSize+bodyLen])
+	if err != nil {
+		return nil, err
 	}
 
-	pkt := &Packet{
+	return &Packet{
 		Seq:   uint32(binary.BigEndian.Uint16(data[2:4])),
 		Route: uint32(binary.BigEndian.Uint16(data[4:6])),
-	}
-	if bodyLen > 0 {
-		pkt.Data = data[topHeroHeaderSize : topHeroHeaderSize+bodyLen]
-	}
-	return pkt, nil
+		Data:  body,
+	}, nil
 }
 
 func (d *Decoder) decodeTopHero() (*Packet, error) {
@@ -626,19 +629,16 @@ func (d *Decoder) decodeTopHero() (*Packet, error) {
 
 	flag := binary.BigEndian.Uint16(header[0:2])
 	bodyLen := int(binary.BigEndian.Uint32(header[6:10]))
-	if flag&(1<<15) != 0 {
-		return nil, errors.New("tophero compressed payload is not supported yet")
-	}
-	if flag&(1<<14) != 0 {
-		return nil, errors.New("tophero encrypted payload is not supported yet")
-	}
-
-	var body []byte
+	payload := make([]byte, bodyLen)
 	if bodyLen > 0 {
-		body = make([]byte, bodyLen)
-		if _, err := io.ReadFull(d.reader, body); err != nil {
+		if _, err := io.ReadFull(d.reader, payload); err != nil {
 			return nil, fmt.Errorf("read payload: %w", err)
 		}
+	}
+
+	body, err := decodeTopHeroPayload(flag, payload)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Packet{
@@ -646,4 +646,160 @@ func (d *Decoder) decodeTopHero() (*Packet, error) {
 		Route: uint32(binary.BigEndian.Uint16(header[4:6])),
 		Data:  body,
 	}, nil
+}
+
+func decodeTopHeroPayload(flag uint16, payload []byte) ([]byte, error) {
+	if flag&topHeroFlagCrypto != 0 {
+		return nil, errors.New("tophero encrypted payload is not supported yet")
+	}
+	if len(payload) == 0 {
+		return nil, nil
+	}
+	if flag&topHeroFlagCompressed == 0 {
+		return append([]byte(nil), payload...), nil
+	}
+
+	body, err := topHeroDecompressPayload(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decompress tophero payload: %w", err)
+	}
+	return body, nil
+}
+
+func topHeroDecompressPayload(payload []byte) ([]byte, error) {
+	out := make([]byte, 0, len(payload))
+	for len(payload) > 0 {
+		method, size, err := readTopHeroVarint(payload)
+		if err != nil {
+			return nil, err
+		}
+		payload = payload[size:]
+
+		decompressedLen, size, err := readTopHeroVarint(payload)
+		if err != nil {
+			return nil, err
+		}
+		payload = payload[size:]
+
+		compressedLen := decompressedLen
+		switch method {
+		case topHeroCompressMethodNone:
+		case topHeroCompressMethodLZ4:
+			compressedLen, size, err = readTopHeroVarint(payload)
+			if err != nil {
+				return nil, err
+			}
+			payload = payload[size:]
+		default:
+			return nil, fmt.Errorf("unsupported tophero compression method %d", method)
+		}
+
+		if compressedLen < 0 || compressedLen > len(payload) {
+			return nil, fmt.Errorf("invalid tophero compressed length %d", compressedLen)
+		}
+
+		block := payload[:compressedLen]
+		payload = payload[compressedLen:]
+
+		switch method {
+		case topHeroCompressMethodNone:
+			if compressedLen != decompressedLen {
+				return nil, fmt.Errorf("invalid tophero plain block length %d, want %d", compressedLen, decompressedLen)
+			}
+			out = append(out, block...)
+		case topHeroCompressMethodLZ4:
+			decoded, err := decodeTopHeroLZ4Block(block, decompressedLen)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, decoded...)
+		}
+	}
+	return out, nil
+}
+
+func readTopHeroVarint(data []byte) (int, int, error) {
+	value := 0
+	shift := 0
+	for index, current := range data {
+		value |= int(current&0x7F) << shift
+		if current&0x80 == 0 {
+			return value, index + 1, nil
+		}
+		shift += 7
+		if shift > 28 {
+			return 0, 0, errors.New("tophero varint is too long")
+		}
+	}
+	return 0, 0, io.ErrUnexpectedEOF
+}
+
+func decodeTopHeroLZ4Block(src []byte, dstLen int) ([]byte, error) {
+	dst := make([]byte, 0, dstLen)
+	for pos := 0; pos < len(src); {
+		token := int(src[pos])
+		pos++
+
+		literalLen := token >> 4
+		if literalLen == 15 {
+			extra, size, err := readTopHeroLZ4Length(src[pos:])
+			if err != nil {
+				return nil, err
+			}
+			literalLen += extra
+			pos += size
+		}
+		if pos+literalLen > len(src) {
+			return nil, io.ErrUnexpectedEOF
+		}
+		dst = append(dst, src[pos:pos+literalLen]...)
+		pos += literalLen
+		if pos >= len(src) {
+			break
+		}
+
+		if pos+2 > len(src) {
+			return nil, io.ErrUnexpectedEOF
+		}
+		offset := int(binary.LittleEndian.Uint16(src[pos : pos+2]))
+		pos += 2
+		if offset <= 0 || offset > len(dst) {
+			return nil, fmt.Errorf("invalid tophero lz4 offset %d", offset)
+		}
+
+		matchLen := token & 0x0F
+		if matchLen == 15 {
+			extra, size, err := readTopHeroLZ4Length(src[pos:])
+			if err != nil {
+				return nil, err
+			}
+			matchLen += extra
+			pos += size
+		}
+		matchLen += 4
+		if len(dst)+matchLen > dstLen {
+			return nil, fmt.Errorf("invalid tophero lz4 match length %d", matchLen)
+		}
+
+		start := len(dst) - offset
+		for i := 0; i < matchLen; i++ {
+			dst = append(dst, dst[start+i])
+		}
+	}
+
+	if len(dst) != dstLen {
+		return nil, fmt.Errorf("invalid tophero lz4 decompressed length %d, want %d", len(dst), dstLen)
+	}
+	return dst, nil
+}
+
+func readTopHeroLZ4Length(data []byte) (int, int, error) {
+	value := 0
+	for index, current := range data {
+		value += int(current)
+		if current != 0xFF {
+			return value, index + 1, nil
+		}
+	}
+	return 0, 0, io.ErrUnexpectedEOF
 }

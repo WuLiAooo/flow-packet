@@ -696,3 +696,46 @@ func TestLegacyDueUnaffected(t *testing.T) {
 		t.Fatalf("legacy data = %q, want %q", decoded.Data, "legacy")
 	}
 }
+
+func TestDecodeTopHeroCompressedPayload(t *testing.T) {
+	compressedPayload := []byte{1, 12, 6, 0x35, 'a', 'b', 'c', 0x03, 0x00}
+	frame := make([]byte, topHeroHeaderSize+len(compressedPayload))
+	binary.BigEndian.PutUint16(frame[0:2], topHeroFlagCompressed)
+	binary.BigEndian.PutUint16(frame[2:4], 42)
+	binary.BigEndian.PutUint16(frame[4:6], 1001)
+	binary.BigEndian.PutUint32(frame[6:10], uint32(len(compressedPayload)))
+	copy(frame[topHeroHeaderSize:], compressedPayload)
+
+	pkt, err := DecodeBytes(frame, PacketConfig{TopHero: &TopHeroConfig{VerifySequence: true}})
+	if err != nil {
+		t.Fatalf("DecodeBytes error: %v", err)
+	}
+	if pkt.Seq != 42 || pkt.Route != 1001 {
+		t.Fatalf("seq/route = %d/%d, want 42/1001", pkt.Seq, pkt.Route)
+	}
+	if got, want := string(pkt.Data), "abcabcabcabc"; got != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+}
+
+func TestDecoderDecodeTopHeroCompressedPayload(t *testing.T) {
+	compressedPayload := []byte{1, 12, 6, 0x35, 'a', 'b', 'c', 0x03, 0x00}
+	frame := make([]byte, topHeroHeaderSize+len(compressedPayload))
+	binary.BigEndian.PutUint16(frame[0:2], topHeroFlagCompressed)
+	binary.BigEndian.PutUint16(frame[2:4], 7)
+	binary.BigEndian.PutUint16(frame[4:6], 258)
+	binary.BigEndian.PutUint32(frame[6:10], uint32(len(compressedPayload)))
+	copy(frame[topHeroHeaderSize:], compressedPayload)
+
+	decoder := NewDecoder(bytes.NewReader(frame), PacketConfig{TopHero: &TopHeroConfig{VerifySequence: true}})
+	pkt, err := decoder.Decode()
+	if err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+	if pkt.Seq != 7 || pkt.Route != 258 {
+		t.Fatalf("seq/route = %d/%d, want 7/258", pkt.Seq, pkt.Route)
+	}
+	if got, want := string(pkt.Data), "abcabcabcabc"; got != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+}
