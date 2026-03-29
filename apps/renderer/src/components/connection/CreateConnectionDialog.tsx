@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+﻿import { useState, useEffect, useMemo } from 'react'
 import { Loader2, Plus, Trash2, Github, ChevronRight, ChevronLeft, ChevronDown, Box, Ellipsis, Route, Hash, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -55,6 +55,7 @@ interface CreateConnectionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   editConnection?: SavedConnection | null
+  preset?: 'tophero-thrift-tcp' | null
 }
 
 function StepIndicator({ step }: { step: number }) {
@@ -81,6 +82,7 @@ export function CreateConnectionDialog({
   open,
   onOpenChange,
   editConnection,
+  preset,
 }: CreateConnectionDialogProps) {
   const addConnection = useSavedConnectionStore((s) => s.addConnection)
   const updateConnection = useSavedConnectionStore((s) => s.updateConnection)
@@ -95,21 +97,38 @@ export function CreateConnectionDialog({
   const [byteOrder, setByteOrder] = useState<ByteOrder>('big')
   const [cherryParser, setCherryParser] = useState<'simple' | 'pomelo'>('simple')
 
-  const NAME_QUOTES = [
-    '海的那边，是自由',
-    '祝你能和重要的人，有一天能够再次相遇',
-    '碎了我们曾经的荣耀，却永远秉承着最骄傲的信仰',
-    '什么都无法舍弃的人，什么都改变不了',
-    '如果奇迹有颜色，那么一定是橙色',
-    '如果结果不如你所愿，就在尘埃落定前奋力一搏',
-    '花无凋零之时，爱无传达之日',
-    '那就永远在一起吧，一直留在你身边',
-    '我能做到吗？肯定能做到的，是你的话，一定可以',
-    '你不打算挣扎一下吗，我们不是最擅长挣扎的吗',
-    '没有未来的未来 不是我想要的未来',
-    '机甲为婚纱，银河为殿堂，爆炸为礼炮',
-    '未闻花名，但知花香，再遇花时，泪已成形'
-  ]
+const NAME_QUOTES = [
+  '别人上班挣钱，我上班凑活活着',
+  '每天都在努力，努力不努力',
+  '我的精神状态：间歇性正常，持续性发疯',
+  '钱没挣到，觉没睡好，快乐倒是离家出走了',
+  '别烦我，我正在和摆烂做激烈思想斗争',
+  '闹钟一响，我就想和全世界请个假',
+  '人生建议：别听建议，开心最重要',
+  '我不是胖，我是可爱到膨胀',
+  '脑子：我会了 手：不，你不会',
+  '除了干饭，其他事都提不起兴趣',
+  '我的社交状态：想聊天又不想理人',
+  '摆烂归摆烂，饭还是要按时吃',
+  '别人脱单我脱发，别人暴富我暴瘦',
+  '每天的心情：想下班，非常想下班',
+  '我不是懒，我只是在节能模式',
+  '理想生活：不上班，还有钱',
+  '别骂我，骂我我就当场撒娇',
+  '我的优点：知错就改，改了再犯',
+  '快乐其实很简单，简单就不快乐了',
+  '熬夜冠军申请出战，谁也别和我抢',
+  '减肥计划：明天开始，永远明天',
+  '我很好，除了没钱没觉没对象',
+  '上班的意义：为了下班',
+  '我的脑子：空空如也但很骄傲',
+  '人生三大难题：吃啥、穿啥、几点睡',
+  '别卷了，再卷我就卷成麻花',
+  '情绪稳定？偶尔，大部分在发疯',
+  '我不是普通废物，是限量版废物',
+  '只要我躺得够平，压力就追不上我',
+  '快乐秘籍：少想破事，多干饭'
+]
   const namePlaceholder = useMemo(() => NAME_QUOTES[Math.floor(Math.random() * NAME_QUOTES.length)], [open])
 
   // form state
@@ -153,6 +172,20 @@ export function CreateConnectionDialog({
         setCodec(editConnection.codec ?? 'protobuf')
         setColor(editConnection.color)
         setStep(4)
+      } else if (preset === 'tophero-thrift-tcp') {
+        setName('')
+        setTag('本地')
+        setHost('')
+        setPort(8801)
+        setProtocol('tcp')
+        setCodec('thrift')
+        setColor(COLOR_OPTIONS[0])
+        setStep(4)
+        setFrameType('template')
+        setSelectedTemplateId('tophero')
+        setCustomFields([{ name: '', bytes: 4 }])
+        setByteOrder('big')
+        setCherryParser('simple')
       } else {
         setName('')
         setTag('本地')
@@ -172,7 +205,7 @@ export function CreateConnectionDialog({
       setShowSaveTemplate(false)
       setTemplateName('')
     }
-  }, [open, editConnection])
+  }, [open, editConnection, preset])
 
   useEffect(() => {
     if (step === 2 && frameType === 'saved') {
@@ -919,6 +952,14 @@ export function CreateConnectionDialog({
               <CardDescription>
                 配置目标服务器的连接信息，保存后可在首页快速访问
               </CardDescription>
+              {preset === 'tophero-thrift-tcp' && !isEdit && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Badge variant="secondary">TopHero</Badge>
+                  <Badge variant="secondary">TCP</Badge>
+                  <Badge variant="secondary">Thrift</Badge>
+
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               <form onSubmit={(e) => { e.preventDefault(); handleSave() }}>
@@ -955,7 +996,7 @@ export function CreateConnectionDialog({
                         max={65535}
                         value={port}
                         onChange={(e) => setPort(e.target.value === '' ? '' : parseInt(e.target.value) || '')}
-                        placeholder="3721"
+                        placeholder="8801"
                         required
                       />
                     </Field>

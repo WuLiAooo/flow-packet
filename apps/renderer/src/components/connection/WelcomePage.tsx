@@ -1,13 +1,13 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import {
   Plug,
-  Plus,
   Search,
   Pencil,
   Trash2,
   GripVertical,
   Github,
+  Zap,
 } from 'lucide-react'
 import {
   DndContext,
@@ -186,6 +186,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConn, setEditingConn] = useState<SavedConnection | null>(null)
+  const [createPreset, setCreatePreset] = useState<'tophero-thrift-tcp' | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SavedConnection | null>(null)
 
   const filteredConnections = useMemo(() => {
@@ -219,6 +220,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
 
   const handleEdit = (e: React.MouseEvent, conn: SavedConnection) => {
     e.stopPropagation()
+    setCreatePreset(null)
     setEditingConn(conn)
     setDialogOpen(true)
   }
@@ -239,7 +241,10 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
 
   const handleDialogClose = (open: boolean) => {
     setDialogOpen(open)
-    if (!open) setEditingConn(null)
+    if (!open) {
+      setEditingConn(null)
+      setCreatePreset(null)
+    }
   }
 
   return (
@@ -262,14 +267,15 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                    className="min-w-8 bg-emerald-600 text-white duration-200 ease-linear hover:bg-emerald-600/90 hover:text-white active:bg-emerald-600/90 active:text-white"
                     onClick={() => {
                       setEditingConn(null)
+                      setCreatePreset('tophero-thrift-tcp')
                       setDialogOpen(true)
                     }}
                   >
-                    <Plus className="size-4" />
-                    <span>创建连接</span>
+                    <Zap className="size-4" />
+                    <span>快速添加</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -373,6 +379,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
         open={dialogOpen}
         onOpenChange={handleDialogClose}
         editConnection={editingConn}
+        preset={createPreset}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
