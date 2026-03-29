@@ -61,6 +61,22 @@ function isGcMessage(message: Pick<MessageInfo, 'Name' | 'ShortName'>): boolean 
   return messageShortName(message).startsWith('Gc')
 }
 
+function matchesMessageSearch(message: MessageInfo, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) return true
+
+  const shortName = messageShortName(message).toLowerCase()
+  if (shortName.includes(normalizedQuery) || message.Name.toLowerCase().includes(normalizedQuery)) {
+    return true
+  }
+
+  if (message.MessageID == null) {
+    return false
+  }
+
+  return String(message.MessageID).includes(normalizedQuery)
+}
+
 export function ProtoBrowser() {
   const files = useProtoStore((s) => s.files)
   const allMessages = useProtoStore((s) => s.messages)
@@ -94,10 +110,7 @@ export function ProtoBrowser() {
       .map((file) => {
         if (file.Path.toLowerCase().includes(q)) return file
 
-        const matched = file.Messages.filter((message) => {
-          const shortName = messageShortName(message).toLowerCase()
-          return shortName.includes(q) || message.Name.toLowerCase().includes(q)
-        })
+        const matched = file.Messages.filter((message) => matchesMessageSearch(message, q))
 
         if (matched.length === 0) return null
         return { ...file, Messages: matched }
@@ -228,7 +241,7 @@ export function ProtoBrowser() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={browserKind === 'request' ? 'Search Cg messages...' : 'Search Gc messages...'}
+            placeholder={browserKind === 'request' ? 'Search Cg name or MSGTYPE...' : 'Search Gc name or MSGTYPE...'}
             className="h-7 border-0 pl-2 text-xs shadow-none focus-visible:ring-0"
           />
         </div>
@@ -584,3 +597,4 @@ function WaitResponseMessageRow({ message }: { message: MessageInfo }) {
     </button>
   )
 }
+
