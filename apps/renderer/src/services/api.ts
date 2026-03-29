@@ -1,11 +1,10 @@
-﻿import { sendRequest } from './ws'
+import { sendRequest } from './ws'
 
 const API_BASE = () => {
   const port = (window as { __BACKEND_PORT__?: number }).__BACKEND_PORT__ || 3001
   return `http://127.0.0.1:${port}`
 }
 
-// TCP 杩炴帴绠＄悊
 export async function connectTCP(host: string, port: number, options?: {
   connectionId?: string
   protocol?: 'tcp' | 'ws'
@@ -27,13 +26,10 @@ export async function getConnectionStatus() {
   return sendRequest('conn.status')
 }
 
-// Proto 绠＄悊
 export async function uploadProtoFiles(files: File[], connectionId: string) {
   const formData = new FormData()
   files.forEach((f) => {
     formData.append('files', f)
-    // webkitRelativePath 鏍煎紡: "閫夋嫨鐨勬枃浠跺す鍚?瀛愯矾寰?file.proto"
-    // 淇濈暀瀹屾暣璺緞锛屽洜涓烘枃浠跺す鍚嶅彲鑳芥槸 proto import 璺緞鐨勪竴閮ㄥ垎
     const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath
     formData.append('paths', relPath ? relPath.replace(/\\/g, '/') : f.name)
   })
@@ -59,7 +55,6 @@ export async function getProtoList(connectionId: string) {
   return sendRequest('proto.list', { connectionId })
 }
 
-// Route 鏄犲皠
 export async function getRouteList(connectionId: string) {
   return sendRequest('route.list', { connectionId })
 }
@@ -72,7 +67,6 @@ export async function deleteRouteMapping(route: number, connectionId: string, st
   return sendRequest('route.delete', { route, stringRoute, connectionId })
 }
 
-// 妯℃澘绠＄悊
 export async function getTemplateList() {
   return sendRequest('template.list')
 }
@@ -85,17 +79,42 @@ export async function deleteTemplate(id: string) {
   return sendRequest('template.delete', { id })
 }
 
-// 闆嗗悎绠＄悊
+export interface CollectionFolderPayload {
+  id: string
+  name: string
+  parentId: string
+  createdAt: number
+}
+
+export interface CollectionListItemPayload {
+  id: string
+  name: string
+  folderId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CollectionDetailPayload extends CollectionListItemPayload {
+  nodes: unknown[]
+  edges: unknown[]
+}
+
 export async function listCollections(connectionId: string) {
   return sendRequest('collection.list', { connectionId }) as Promise<{
-    folders: { id: string; name: string; parentId: string; createdAt: number }[]
-    items: { id: string; name: string; folderId: string; nodes: unknown[]; edges: unknown[]; createdAt: number; updatedAt: number }[]
+    folders: CollectionFolderPayload[]
+    items: CollectionListItemPayload[]
+  }>
+}
+
+export async function getCollection(connectionId: string, id: string) {
+  return sendRequest('collection.get', { connectionId, id }) as Promise<{
+    item: CollectionDetailPayload
   }>
 }
 
 export async function saveCollection(connectionId: string, name: string, folderId: string, nodes: unknown[], edges: unknown[]) {
   return sendRequest('collection.save', { connectionId, name, folderId, nodes, edges }) as Promise<{
-    item: { id: string; name: string; folderId: string; nodes: unknown[]; edges: unknown[]; createdAt: number; updatedAt: number }
+    item: CollectionListItemPayload
   }>
 }
 
@@ -113,7 +132,7 @@ export async function deleteCollection(connectionId: string, id: string) {
 
 export async function createCollectionFolder(connectionId: string, name: string, parentId: string) {
   return sendRequest('collection.folder.create', { connectionId, name, parentId }) as Promise<{
-    folder: { id: string; name: string; parentId: string; createdAt: number }
+    folder: CollectionFolderPayload
   }>
 }
 
@@ -133,7 +152,6 @@ export async function moveCollection(connectionId: string, id: string, folderId:
   return sendRequest('collection.move', { connectionId, id, folderId })
 }
 
-// 娴佺▼鎵ц
 export async function loginDeviceSession(connectionId: string, deviceId: string) {
   return sendRequest('session.login', { connectionId, deviceId })
 }
@@ -141,6 +159,7 @@ export async function loginDeviceSession(connectionId: string, deviceId: string)
 export async function logoutDeviceSession(connectionId: string, deviceId: string) {
   return sendRequest('session.logout', { connectionId, deviceId })
 }
+
 export async function executeFlow(nodes: unknown[], edges: unknown[], connectionId: string, deviceId?: string) {
   return sendRequest('flow.execute', { nodes, edges, connectionId, deviceId })
 }
@@ -148,10 +167,3 @@ export async function executeFlow(nodes: unknown[], edges: unknown[], connection
 export async function stopFlow() {
   return sendRequest('flow.stop')
 }
-
-
-
-
-
-
-

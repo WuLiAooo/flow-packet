@@ -1,10 +1,8 @@
-import { useState, useRef } from 'react'
-import { Pencil, Trash2, Folder, FolderPlus, ChevronRight, LayoutDashboard } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ChevronRight, Folder, FolderPlus, LayoutDashboard, Pencil, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Collapsible,
-  CollapsibleContent,
-} from '@/components/ui/collapsible'
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -23,13 +21,13 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useCollectionStore, type Collection, type CollectionFolder } from '@/stores/collectionStore'
+import { useCollectionStore, type CollectionFolder, type CollectionSummary } from '@/stores/collectionStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useTabStore } from '@/stores/tabStore'
 
@@ -58,28 +56,30 @@ export function CollectionBrowser() {
 
   const handleDrop = (targetFolderId: string) => {
     if (!dragItem || !activeConnectionId) return
+
     if (dragItem.type === 'folder') {
       if (dragItem.id === targetFolderId) return
-      moveFolder(activeConnectionId, dragItem.id, targetFolderId)
+      void moveFolder(activeConnectionId, dragItem.id, targetFolderId)
     } else {
-      moveCollection(activeConnectionId, dragItem.id, targetFolderId)
+      void moveCollection(activeConnectionId, dragItem.id, targetFolderId)
     }
+
     dragItem = null
   }
 
   const rootFolders = folders.filter((f) => !f.parentId)
-  const rootCollections = collections.filter((c) => !c.folderId)
+  const root集合 = collections.filter((c) => !c.folderId)
 
   return (
-    <div className="flex flex-col h-full" style={{ paddingLeft: 10 }}>
-      <div className="flex items-center justify-between px-2 h-8 shrink-0">
+    <div className="flex h-full flex-col" style={{ paddingLeft: 10 }}>
+      <div className="flex h-8 shrink-0 items-center justify-between px-2">
         <span className="text-xs font-medium text-muted-foreground">集合</span>
         <button
           onClick={() => {
             setCreatingFolder(true)
             setNewFolderName('')
           }}
-          className="flex items-center justify-center size-5 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-accent-foreground"
+          className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <FolderPlus className="size-3.5" />
         </button>
@@ -101,17 +101,24 @@ export function CollectionBrowser() {
           <SidebarGroupContent>
             <SidebarMenu>
               {rootFolders.map((folder) => (
-                <FolderNode key={folder.id} folder={folder} folders={folders} collections={collections} onDrop={handleDrop} />
+                <FolderNode
+                  key={folder.id}
+                  folder={folder}
+                  folders={folders}
+                  collections={collections}
+                  onDrop={handleDrop}
+                />
               ))}
-              {rootCollections.map((col) => (
-                <CollectionNode key={col.id} collection={col} />
+              {root集合.map((collection) => (
+                <CollectionNode key={collection.id} collection={collection} />
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        {rootFolders.length === 0 && rootCollections.length === 0 && (
+
+        {rootFolders.length === 0 && root集合.length === 0 && (
           <div className="px-3 py-4 text-center">
-            <span className="text-xs text-muted-foreground">尚未保存任何集合</span>
+            <span className="text-xs text-muted-foreground">暂无已保存集合</span>
           </div>
         )}
       </ScrollArea>
@@ -119,20 +126,20 @@ export function CollectionBrowser() {
       <Dialog open={creatingFolder} onOpenChange={setCreatingFolder}>
         <DialogContent className="sm:max-w-[360px]">
           <DialogHeader>
-            <DialogTitle>新建集合</DialogTitle>
+            <DialogTitle>新建文件夹</DialogTitle>
           </DialogHeader>
           <Input
-            placeholder="集合名称"
+            placeholder="文件夹名称"
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+            onKeyDown={(e) => e.key === 'Enter' && void handleCreateFolder()}
             autoFocus
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreatingFolder(false)}>
               取消
             </Button>
-            <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
+            <Button onClick={() => void handleCreateFolder()} disabled={!newFolderName.trim()}>
               保存
             </Button>
           </DialogFooter>
@@ -150,7 +157,7 @@ function FolderNode({
 }: {
   folder: CollectionFolder
   folders: CollectionFolder[]
-  collections: Collection[]
+  collections: CollectionSummary[]
   onDrop: (targetFolderId: string) => void
 }) {
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
@@ -159,26 +166,26 @@ function FolderNode({
   const createFolder = useCollectionStore((s) => s.createFolder)
 
   const [isOpen, setIsOpen] = useState(false)
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [renameName, setRenameName] = useState('')
+  const [renameOpen, set重命名Open] = useState(false)
+  const [renameName, set重命名Name] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const dragCountRef = useRef(0)
 
   const childFolders = folders.filter((f) => f.parentId === folder.id)
-  const childCollections = collections.filter((c) => c.folderId === folder.id)
+  const child集合 = collections.filter((c) => c.folderId === folder.id)
 
-  const handleRenameStart = () => {
-    setRenameName(folder.name)
-    setRenameOpen(true)
+  const handle重命名Start = () => {
+    set重命名Name(folder.name)
+    set重命名Open(true)
   }
 
-  const handleRenameConfirm = () => {
+  const handle重命名确认 = () => {
     const name = renameName.trim()
     if (!name || !activeConnectionId) return
-    renameFolder(activeConnectionId, folder.id, name)
-    setRenameOpen(false)
+    void renameFolder(activeConnectionId, folder.id, name)
+    set重命名Open(false)
   }
 
   const handleCreateFolder = async () => {
@@ -187,6 +194,7 @@ function FolderNode({
     await createFolder(activeConnectionId, name, folder.id)
     setCreateOpen(false)
     setNewFolderName('')
+    setIsOpen(true)
   }
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -203,14 +211,14 @@ function FolderNode({
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    dragCountRef.current++
+    dragCountRef.current += 1
     setDragOver(true)
   }
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    dragCountRef.current--
+    dragCountRef.current -= 1
     if (dragCountRef.current === 0) {
       setDragOver(false)
     }
@@ -236,9 +244,9 @@ function FolderNode({
               onDragEnter={handleDragEnter}
               onDragLeave={handleDragLeave}
               onDrop={handleDropOnFolder}
-              className={dragOver ? 'bg-sidebar-accent rounded-md' : ''}
+              className={dragOver ? 'rounded-md bg-sidebar-accent' : ''}
             >
-              <SidebarMenuButton onClick={() => setIsOpen((v) => !v)}>
+              <SidebarMenuButton onClick={() => setIsOpen((value) => !value)}>
                 <ChevronRight className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                 <Folder />
                 <span className="truncate">{folder.name}</span>
@@ -250,30 +258,40 @@ function FolderNode({
               <FolderPlus />
               <span>新建文件夹</span>
             </ContextMenuItem>
-            <ContextMenuItem onClick={handleRenameStart}>
+            <ContextMenuItem onClick={handle重命名Start}>
               <Pencil />
               <span>重命名</span>
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem variant="destructive" onClick={() => activeConnectionId && deleteFolder(activeConnectionId, folder.id)}>
+            <ContextMenuItem
+              variant="destructive"
+              onClick={() => activeConnectionId && void deleteFolder(activeConnectionId, folder.id)}
+            >
               <Trash2 />
               <span>删除</span>
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+
         <CollapsibleContent>
           <SidebarMenuSub>
-            {childFolders.map((f) => (
-              <FolderNode key={f.id} folder={f} folders={folders} collections={collections} onDrop={onDrop} />
+            {childFolders.map((childFolder) => (
+              <FolderNode
+                key={childFolder.id}
+                folder={childFolder}
+                folders={folders}
+                collections={collections}
+                onDrop={onDrop}
+              />
             ))}
-            {childCollections.map((col) => (
-              <CollectionNode key={col.id} collection={col} />
+            {child集合.map((collection) => (
+              <CollectionNode key={collection.id} collection={collection} />
             ))}
           </SidebarMenuSub>
         </CollapsibleContent>
       </Collapsible>
 
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+      <Dialog open={renameOpen} onOpenChange={set重命名Open}>
         <DialogContent className="sm:max-w-[360px]">
           <DialogHeader>
             <DialogTitle>重命名文件夹</DialogTitle>
@@ -281,15 +299,15 @@ function FolderNode({
           <Input
             placeholder="文件夹名称"
             value={renameName}
-            onChange={(e) => setRenameName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleRenameConfirm()}
+            onChange={(e) => set重命名Name(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handle重命名确认()}
             autoFocus
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameOpen(false)}>
+            <Button variant="outline" onClick={() => set重命名Open(false)}>
               取消
             </Button>
-            <Button onClick={handleRenameConfirm} disabled={!renameName.trim()}>
+            <Button onClick={handle重命名确认} disabled={!renameName.trim()}>
               确认
             </Button>
           </DialogFooter>
@@ -305,14 +323,14 @@ function FolderNode({
             placeholder="文件夹名称"
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+            onKeyDown={(e) => e.key === 'Enter' && void handleCreateFolder()}
             autoFocus
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
+            <Button onClick={() => void handleCreateFolder()} disabled={!newFolderName.trim()}>
               保存
             </Button>
           </DialogFooter>
@@ -322,34 +340,56 @@ function FolderNode({
   )
 }
 
-function CollectionNode({ collection }: { collection: Collection }) {
+function CollectionNode({ collection }: { collection: CollectionSummary }) {
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const renameCollection = useCollectionStore((s) => s.renameCollection)
   const deleteCollection = useCollectionStore((s) => s.deleteCollection)
+  const loadCollection = useCollectionStore((s) => s.loadCollection)
+  const tabs = useTabStore((s) => s.tabs)
+  const switchTab = useTabStore((s) => s.switchTab)
   const openTab = useTabStore((s) => s.openTab)
 
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [renameName, setRenameName] = useState('')
+  const [renameOpen, set重命名Open] = useState(false)
+  const [renameName, set重命名Name] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleLoad = () => {
-    openTab(collection.name, collection.id, collection.nodes, collection.edges)
+  const handleLoad = async () => {
+    const existingTab = tabs.find((tab) => tab.collectionId === collection.id)
+    if (existingTab) {
+      switchTab(existingTab.id)
+      return
+    }
+
+    if (!activeConnectionId || loading) return
+
+    setLoading(true)
+    try {
+      const detail = await loadCollection(activeConnectionId, collection.id)
+      openTab(collection.name, collection.id, detail.nodes, detail.edges)
+    } catch (err) {
+      toast.error('加载集合失败', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleRenameStart = () => {
-    setRenameName(collection.name)
-    setRenameOpen(true)
+  const handle重命名Start = () => {
+    set重命名Name(collection.name)
+    set重命名Open(true)
   }
 
-  const handleRenameConfirm = () => {
+  const handle重命名确认 = () => {
     const name = renameName.trim()
     if (!name || !activeConnectionId) return
-    renameCollection(activeConnectionId, collection.id, name)
-    setRenameOpen(false)
+    void renameCollection(activeConnectionId, collection.id, name)
+    set重命名Open(false)
   }
 
-  const handleDelete = () => {
+  const handle删除 = () => {
     if (!activeConnectionId) return
-    deleteCollection(activeConnectionId, collection.id)
+    void deleteCollection(activeConnectionId, collection.id)
   }
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -362,12 +402,9 @@ function CollectionNode({ collection }: { collection: Collection }) {
     <SidebarMenuItem>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            draggable
-            onDragStart={handleDragStart}
-          >
+          <div draggable onDragStart={handleDragStart}>
             <SidebarMenuButton
-              onClick={handleLoad}
+              onClick={() => void handleLoad()}
               className="active:bg-sidebar-accent active:text-sidebar-accent-foreground"
             >
               <LayoutDashboard />
@@ -376,19 +413,19 @@ function CollectionNode({ collection }: { collection: Collection }) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={handleRenameStart}>
+          <ContextMenuItem onClick={handle重命名Start}>
             <Pencil />
             <span>重命名</span>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onClick={handleDelete}>
+          <ContextMenuItem variant="destructive" onClick={handle删除}>
             <Trash2 />
             <span>删除</span>
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
 
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+      <Dialog open={renameOpen} onOpenChange={set重命名Open}>
         <DialogContent className="sm:max-w-[360px]">
           <DialogHeader>
             <DialogTitle>重命名集合</DialogTitle>
@@ -396,15 +433,15 @@ function CollectionNode({ collection }: { collection: Collection }) {
           <Input
             placeholder="集合名称"
             value={renameName}
-            onChange={(e) => setRenameName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleRenameConfirm()}
+            onChange={(e) => set重命名Name(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handle重命名确认()}
             autoFocus
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameOpen(false)}>
+            <Button variant="outline" onClick={() => set重命名Open(false)}>
               取消
             </Button>
-            <Button onClick={handleRenameConfirm} disabled={!renameName.trim()}>
+            <Button onClick={handle重命名确认} disabled={!renameName.trim()}>
               确认
             </Button>
           </DialogFooter>

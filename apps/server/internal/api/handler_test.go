@@ -178,7 +178,6 @@ func TestRouteSetListDelete(t *testing.T) {
 
 	connID := "conn_1_abc"
 
-	// 璁剧疆 route 鏄犲皠
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": connID,
 		"route":        1001,
@@ -189,7 +188,6 @@ func TestRouteSetListDelete(t *testing.T) {
 		t.Fatalf("set event = %q, want %q", resp.Event, "route.set")
 	}
 
-	// 鍒楀嚭 route 鏄犲皠
 	resp = wsRequest(t, ws, "2", "route.list", map[string]string{"connectionId": connID})
 	if resp.Event != "route.list" {
 		t.Fatalf("list event = %q, want %q", resp.Event, "route.list")
@@ -206,13 +204,11 @@ func TestRouteSetListDelete(t *testing.T) {
 		t.Fatalf("route = %d, want 1001", listResult.Routes[0].Route)
 	}
 
-	// 鍒犻櫎 route
 	resp = wsRequest(t, ws, "3", "route.delete", map[string]any{"route": 1001, "connectionId": connID})
 	if resp.Event != "route.delete" {
 		t.Fatalf("delete event = %q, want %q", resp.Event, "route.delete")
 	}
 
-	// 楠岃瘉宸插垹闄?
 	resp = wsRequest(t, ws, "4", "route.list", map[string]string{"connectionId": connID})
 	payload, _ = json.Marshal(resp.Payload)
 	json.Unmarshal(payload, &listResult)
@@ -230,7 +226,7 @@ func TestRouteSetInvalid(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// route 涓?0 搴旀姤閿?
+	// route 婵?0 闁圭厧鐡ㄥ瑙勬叏閵堝鐓?
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": "conn_1_abc",
 		"route":        0,
@@ -275,9 +271,9 @@ func TestCollectionsAreSharedAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list collections: %v", err)
 	}
-	collections, ok := result.(*CollectionData)
+	collections, ok := result.(*CollectionListData)
 	if !ok {
-		t.Fatalf("list result type = %T, want *CollectionData", result)
+		t.Fatalf("list result type = %T, want *CollectionListData", result)
 	}
 	if len(collections.Items) != 1 {
 		t.Fatalf("item count = %d, want 1", len(collections.Items))
@@ -287,6 +283,65 @@ func TestCollectionsAreSharedAcrossConnections(t *testing.T) {
 	}
 	if _, err := os.Stat(state.CollectionFile); err != nil {
 		t.Fatalf("global collection file missing: %v", err)
+	}
+}
+func TestCollectionGetReturnsGraphPayload(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "collection-get-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	state := NewAppState(tmpDir)
+	saveHandler := makeCollectionSaveHandler(state)
+	getHandler := makeCollectionGetHandler(state)
+
+	savePayload, err := json.Marshal(map[string]any{
+		"connectionId": "conn_1_abc",
+		"name":         "Detail Flow",
+		"nodes":        json.RawMessage(`[{"id":"node-1","type":"requestNode"}]`),
+		"edges":        json.RawMessage(`[{"id":"edge-1"}]`),
+	})
+	if err != nil {
+		t.Fatalf("marshal save payload: %v", err)
+	}
+	result, err := saveHandler(savePayload)
+	if err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+
+	payload, _ := json.Marshal(result)
+	var saved struct {
+		Item CollectionItemSummary `json:"item"`
+	}
+	if err := json.Unmarshal(payload, &saved); err != nil {
+		t.Fatalf("unmarshal save response: %v", err)
+	}
+
+	getPayload, err := json.Marshal(map[string]any{
+		"connectionId": "conn_1_abc",
+		"id":           saved.Item.ID,
+	})
+	if err != nil {
+		t.Fatalf("marshal get payload: %v", err)
+	}
+	result, err = getHandler(getPayload)
+	if err != nil {
+		t.Fatalf("get collection: %v", err)
+	}
+
+	responsePayload, _ := json.Marshal(result)
+	var detail struct {
+		Item CollectionItem `json:"item"`
+	}
+	if err := json.Unmarshal(responsePayload, &detail); err != nil {
+		t.Fatalf("unmarshal get response: %v", err)
+	}
+	if string(detail.Item.Nodes) != `[{"id":"node-1","type":"requestNode"}]` {
+		t.Fatalf("nodes = %s", string(detail.Item.Nodes))
+	}
+	if string(detail.Item.Edges) != `[{"id":"edge-1"}]` {
+		t.Fatalf("edges = %s", string(detail.Item.Edges))
 	}
 }
 
@@ -345,9 +400,9 @@ func TestLegacyCollectionsMigrateToGlobalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list collections after migration: %v", err)
 	}
-	collections, ok := result.(*CollectionData)
+	collections, ok := result.(*CollectionListData)
 	if !ok {
-		t.Fatalf("list result type = %T, want *CollectionData", result)
+		t.Fatalf("list result type = %T, want *CollectionListData", result)
 	}
 	if len(collections.Folders) != 1 {
 		t.Fatalf("folder count = %d, want 1", len(collections.Folders))
@@ -373,9 +428,9 @@ func TestLegacyCollectionsMigrateToGlobalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list collections after restart: %v", err)
 	}
-	collections, ok = result.(*CollectionData)
+	collections, ok = result.(*CollectionListData)
 	if !ok {
-		t.Fatalf("list result type after restart = %T, want *CollectionData", result)
+		t.Fatalf("list result type after restart = %T, want *CollectionListData", result)
 	}
 	if len(collections.Items) != 2 {
 		t.Fatalf("item count after restart = %d, want 2", len(collections.Items))

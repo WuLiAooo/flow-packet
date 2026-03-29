@@ -164,6 +164,7 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("template.save", makeTemplateSaveHandler(state))
 	srv.Handle("template.delete", makeTemplateDeleteHandler(state))
 	srv.Handle("collection.list", makeCollectionListHandler(state))
+	srv.Handle("collection.get", makeCollectionGetHandler(state))
 	srv.Handle("collection.save", makeCollectionSaveHandler(state))
 	srv.Handle("collection.update", makeCollectionUpdateHandler(state))
 	srv.Handle("collection.rename", makeCollectionRenameHandler(state))
@@ -549,6 +550,44 @@ type CollectionData struct {
 	Items   []CollectionItem   `json:"items"`
 }
 
+type CollectionItemSummary struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	FolderID  string `json:"folderId"`
+	CreatedAt int64  `json:"createdAt"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+type CollectionListData struct {
+	Folders []CollectionFolder      `json:"folders"`
+	Items   []CollectionItemSummary `json:"items"`
+}
+
+func makeCollectionListData(col *CollectionData) *CollectionListData {
+	if col == nil {
+		return &CollectionListData{
+			Folders: []CollectionFolder{},
+			Items:   []CollectionItemSummary{},
+		}
+	}
+
+	items := make([]CollectionItemSummary, 0, len(col.Items))
+	for _, item := range col.Items {
+		items = append(items, CollectionItemSummary{
+			ID:        item.ID,
+			Name:      item.Name,
+			FolderID:  item.FolderID,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+		})
+	}
+
+	return &CollectionListData{
+		Folders: col.Folders,
+		Items:   items,
+	}
+}
+
 func emptyCollectionData() *CollectionData {
 	return &CollectionData{
 		Folders: []CollectionFolder{},
@@ -761,7 +800,35 @@ func makeCollectionListHandler(state *AppState) HandlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read collections: %w", err)
 		}
-		return col, nil
+		return makeCollectionListData(col), nil
+	}
+}
+func makeCollectionGetHandler(state *AppState) HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		colFile, err := getCollectionFile(state, payload)
+		if err != nil {
+			return nil, err
+		}
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+		if req.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
+
+		col, err := readCollections(colFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read collections: %w", err)
+		}
+		for _, item := range col.Items {
+			if item.ID == req.ID {
+				return map[string]any{"item": item}, nil
+			}
+		}
+		return nil, fmt.Errorf("collection not found: %s", req.ID)
 	}
 }
 func makeCollectionSaveHandler(state *AppState) HandlerFunc {

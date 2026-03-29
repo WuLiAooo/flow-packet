@@ -10,21 +10,25 @@ export interface CollectionFolder {
   createdAt: number
 }
 
-export interface Collection {
+export interface CollectionSummary {
   id: string
   name: string
   folderId: string
-  nodes: Node<AnyNodeData>[]
-  edges: Edge[]
   createdAt: number
   updatedAt: number
 }
 
+export interface CollectionDetail extends CollectionSummary {
+  nodes: Node<AnyNodeData>[]
+  edges: Edge[]
+}
+
 interface CollectionStore {
   folders: CollectionFolder[]
-  collections: Collection[]
+  collections: CollectionSummary[]
 
   loadCollections: (connectionId: string) => Promise<void>
+  loadCollection: (connectionId: string, id: string) => Promise<CollectionDetail>
   saveCollection: (connectionId: string, name: string, folderId: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => Promise<string>
   updateCollection: (connectionId: string, id: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => Promise<void>
   renameCollection: (connectionId: string, id: string, name: string) => Promise<void>
@@ -45,13 +49,18 @@ export const useCollectionStore = create<CollectionStore>((set) => ({
     const data = await api.listCollections(connectionId)
     set({
       folders: data.folders as CollectionFolder[],
-      collections: data.items as Collection[],
+      collections: data.items as CollectionSummary[],
     })
+  },
+
+  loadCollection: async (connectionId, id) => {
+    const { item } = await api.getCollection(connectionId, id)
+    return item as CollectionDetail
   },
 
   saveCollection: async (connectionId, name, folderId, nodes, edges) => {
     const { item } = await api.saveCollection(connectionId, name, folderId, nodes, edges)
-    set((s) => ({ collections: [...s.collections, item as Collection] }))
+    set((s) => ({ collections: [...s.collections, item as CollectionSummary] }))
     return item.id
   },
 
@@ -59,7 +68,7 @@ export const useCollectionStore = create<CollectionStore>((set) => ({
     await api.updateCollection(connectionId, id, nodes, edges)
     set((s) => ({
       collections: s.collections.map((c) =>
-        c.id === id ? { ...c, nodes, edges, updatedAt: Date.now() } : c
+        c.id === id ? { ...c, updatedAt: Date.now() } : c
       ),
     }))
   },
