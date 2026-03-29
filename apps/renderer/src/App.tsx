@@ -156,7 +156,7 @@ function App() {
     execStore.clearNodeOutputs()
     execStore.setStatus('idle')
 
-    useTabStore.getState().resetTabs()
+    useTabStore.getState().loadConnectionTabs(connection.id)
     useCollectionStore.getState().loadCollections(connection.id).catch(() => {})
 
     getProtoList(connection.id).then((result: unknown) => {
@@ -199,14 +199,16 @@ function App() {
   }, [setActiveConnectionId, setConfig, setFiles, setMessages, setRouteFields, setRouteMappings, setTargetAddr])
 
   const handleBackToWelcome = useCallback(() => {
+    if (activeConnectionId) {
+      useTabStore.getState().persistTabsForConnection(activeConnectionId)
+    }
     setFiles([])
     setMessages([])
     setRouteMappings([])
     setActiveConnectionId(null)
-    useTabStore.getState().resetTabs()
     useCollectionStore.getState().clearCollections()
     useSessionStatusStore.getState().clearAll()
-  }, [setActiveConnectionId, setFiles, setMessages, setRouteMappings])
+  }, [activeConnectionId, setActiveConnectionId, setFiles, setMessages, setRouteMappings])
 
   if (!activeConnectionId) {
     return (

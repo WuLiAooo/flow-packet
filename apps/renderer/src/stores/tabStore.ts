@@ -2,6 +2,7 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { AnyNodeData } from './canvasStore'
 import { normalizeCanvasGraph, useCanvasStore } from './canvasStore'
+import { useConnectionStore } from './connectionStore'
 
 export interface CanvasTab {
   id: string
@@ -10,6 +11,11 @@ export interface CanvasTab {
   nodes: Node<AnyNodeData>[]
   edges: Edge[]
   dirty: boolean
+}
+
+interface PersistedTabSession {
+  tabs: CanvasTab[]
+  activeTabId: string | null
 }
 
 interface TabStore {
@@ -23,9 +29,13 @@ interface TabStore {
   renameTab: (tabId: string, name: string) => void
   markClean: (tabId: string) => void
   setCollectionId: (tabId: string, collectionId: string) => void
+  loadConnectionTabs: (connectionId: string) => void
+  persistTabsForConnection: (connectionId: string) => void
   _saveActiveTab: () => void
   resetTabs: () => void
 }
+
+const STORAGE_KEY = 'flow-packet-tabs-by-connection'
 
 function createDefaultTab(): CanvasTab {
   const canvas = normalizeCanvasGraph([], [])
@@ -38,13 +48,83 @@ function createDefaultTab(): CanvasTab {
   }
 }
 
+function loadPersistedSessions(): Record<string, PersistedTabSession> {
+  if (typeof localStorage === 'undefined') return {}
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    return parsed as Record<string, PersistedTabSession>
+  } catch {
+    return {}
+  }
+}
+
+function persistSessions(sessions: Record<string, PersistedTabSession>) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+}
+
+function normalizeTab(tab: CanvasTab): CanvasTab {
+  const normalized = normalizeCanvasGraph(tab.nodes ?? [], tab.edges ?? [])
+  const name = typeof tab.name === 'string' && tab.name.trim() ? tab.name : 'Untitled'
+
+  return {
+    id: typeof tab.id === 'string' && tab.id ? tab.id : crypto.randomUUID(),
+    name,
+    collectionId: typeof tab.collectionId === 'string' && tab.collectionId ? tab.collectionId : undefined,
+    nodes: normalized.nodes,
+    edges: normalized.edges,
+    dirty: Boolean(tab.dirty),
+  }
+}
+
+function createFallbackSession(): PersistedTabSession {
+  const tab = createDefaultTab()
+  return {
+    tabs: [tab],
+    activeTabId: tab.id,
+  }
+}
+
+function getPersistedSession(connectionId: string): PersistedTabSession {
+  const session = loadPersistedSessions()[connectionId]
+  if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) {
+    return createFallbackSession()
+  }
+
+  const tabs = session.tabs.map(normalizeTab)
+  const activeTabId = session.activeTabId && tabs.some((tab) => tab.id === session.activeTabId)
+    ? session.activeTabId
+    : tabs[0]?.id ?? null
+
+  return {
+    tabs,
+    activeTabId,
+  }
+}
+
+function persistConnectionTabs(connectionId: string, tabs: CanvasTab[], activeTabId: string | null) {
+  const sessions = loadPersistedSessions()
+  sessions[connectionId] = { tabs, activeTabId }
+  persistSessions(sessions)
+}
+
+function persistActiveConnectionTabs(snapshot: { tabs: CanvasTab[]; activeTabId: string | null }) {
+  const connectionId = useConnectionStore.getState().activeConnectionId
+  if (!connectionId) return
+  persistConnectionTabs(connectionId, snapshot.tabs, snapshot.activeTabId)
+}
+
 let _switching = false
 
-const defaultTab = createDefaultTab()
+const defaultSession = createFallbackSession()
 
 export const useTabStore = create<TabStore>((set, get) => ({
-  tabs: [defaultTab],
-  activeTabId: defaultTab.id,
+  tabs: defaultSession.tabs,
+  activeTabId: defaultSession.activeTabId,
 
   _saveActiveTab: () => {
     const { activeTabId, tabs } = get()
@@ -58,6 +138,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
           : t,
       ),
     })
+    persistActiveConnectionTabs(get())
   },
 
   renameTab: (tabId, name) => {
@@ -68,18 +149,41 @@ export const useTabStore = create<TabStore>((set, get) => ({
         t.id === tabId ? { ...t, name: trimmed, dirty: true } : t,
       ),
     }))
+    persistActiveConnectionTabs(get())
   },
 
   markClean: (tabId) => {
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, dirty: false } : t)),
     }))
+    persistActiveConnectionTabs(get())
   },
 
   setCollectionId: (tabId, collectionId) => {
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, collectionId } : t)),
     }))
+    persistActiveConnectionTabs(get())
+  },
+
+  loadConnectionTabs: (connectionId) => {
+    const session = getPersistedSession(connectionId)
+    const activeTab = session.tabs.find((tab) => tab.id === session.activeTabId) ?? session.tabs[0] ?? createDefaultTab()
+    const normalized = normalizeCanvasGraph(activeTab.nodes, activeTab.edges)
+
+    _switching = true
+    set({ tabs: session.tabs, activeTabId: activeTab.id })
+    useCanvasStore.getState().setNodes(normalized.nodes)
+    useCanvasStore.getState().setEdges(normalized.edges)
+    _switching = false
+
+    persistConnectionTabs(connectionId, session.tabs, activeTab.id)
+  },
+
+  persistTabsForConnection: (connectionId) => {
+    get()._saveActiveTab()
+    const { tabs, activeTabId } = get()
+    persistConnectionTabs(connectionId, tabs, activeTabId)
   },
 
   addTab: () => {
@@ -91,6 +195,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
     useCanvasStore.getState().setNodes(tab.nodes)
     useCanvasStore.getState().setEdges(tab.edges)
     _switching = false
+    persistActiveConnectionTabs(get())
   },
 
   openTab: (name, collectionId, nodes, edges) => {
@@ -115,6 +220,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
     useCanvasStore.getState().setNodes(normalized.nodes)
     useCanvasStore.getState().setEdges(normalized.edges)
     _switching = false
+    persistActiveConnectionTabs(get())
   },
 
   switchTab: (tabId) => {
@@ -129,15 +235,17 @@ export const useTabStore = create<TabStore>((set, get) => ({
     useCanvasStore.getState().setNodes(normalized.nodes)
     useCanvasStore.getState().setEdges(normalized.edges)
     _switching = false
+    persistActiveConnectionTabs(get())
   },
 
   resetTabs: () => {
-    const tab = createDefaultTab()
+    const session = createFallbackSession()
     _switching = true
-    set({ tabs: [tab], activeTabId: tab.id })
-    useCanvasStore.getState().setNodes(tab.nodes)
-    useCanvasStore.getState().setEdges(tab.edges)
+    set({ tabs: session.tabs, activeTabId: session.activeTabId })
+    useCanvasStore.getState().setNodes(session.tabs[0].nodes)
+    useCanvasStore.getState().setEdges(session.tabs[0].edges)
     _switching = false
+    persistActiveConnectionTabs(get())
   },
 
   closeTab: (tabId) => {
@@ -171,6 +279,8 @@ export const useTabStore = create<TabStore>((set, get) => ({
     } else {
       set({ tabs: newTabs })
     }
+
+    persistActiveConnectionTabs(get())
   },
 }))
 
@@ -179,9 +289,14 @@ useCanvasStore.subscribe((state, prev) => {
   if (state.nodes === prev.nodes && state.edges === prev.edges) return
   const { activeTabId } = useTabStore.getState()
   if (!activeTabId) return
+
   useTabStore.setState((s) => ({
     tabs: s.tabs.map((t) =>
-      t.id === activeTabId ? { ...t, dirty: true } : t,
+      t.id === activeTabId
+        ? { ...t, nodes: state.nodes, edges: state.edges, dirty: true }
+        : t,
     ),
   }))
+
+  persistActiveConnectionTabs(useTabStore.getState())
 })
