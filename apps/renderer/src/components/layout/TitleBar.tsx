@@ -36,7 +36,7 @@ export function TitleBar() {
   return (
     <div className="flex items-center h-8 shrink-0 select-none" style={{ background: 'var(--bg-toolbar)' }}>
       <div className="flex-1 h-full" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
-        <span className="text-xs text-muted-foreground leading-8 pl-3">FlowPacket</span>
+        <span className="text-xs text-muted-foreground leading-8 pl-3">LinkWeaver</span>
       </div>
       <div className="flex h-full">
         <button
@@ -65,3 +65,4 @@ export function TitleBar() {
     </div>
   )
 }
+

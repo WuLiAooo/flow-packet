@@ -1,10 +1,10 @@
-# FlowPacket
+# LinkWeaver
 
-English | [中文](./README_CN.md)
+English | [涓枃](./README_CN.md)
 
 A canvas-based testing tool for custom protocol frames, supporting multiple network protocols and encoding formats.
 
-## 🤔 Why FlowPacket
+## 馃 Why LinkWeaver
 
 The nature of game servers makes common testing tools impractical:
 
@@ -14,7 +14,7 @@ The nature of game servers makes common testing tools impractical:
 
 - **Test Cases Are Hard to Manage**
 
-  Traditionally, testing means writing a `Client.go` with handcrafted send/receive logic. As test scenarios grow, the file bloats — you constantly add new functions, comment out unused cases, and uncomment them to switch targets. Game workflows are often multi-step and sequential (e.g., create a character, then enter the game), so verifying just a few steps requires repeatedly commenting and restoring prerequisites — the management overhead far exceeds the writing effort
+  Traditionally, testing means writing a `Client.go` with handcrafted send/receive logic. As test scenarios grow, the file bloats 鈥?you constantly add new functions, comment out unused cases, and uncomment them to switch targets. Game workflows are often multi-step and sequential (e.g., create a character, then enter the game), so verifying just a few steps requires repeatedly commenting and restoring prerequisites 鈥?the management overhead far exceeds the writing effort
 
 - **Lack of Proto Encoding Support**
 
@@ -22,11 +22,11 @@ The nature of game servers makes common testing tools impractical:
 
 - **Need to Test Through the Gateway**
 
-  Game servers need to test not only request-response logic but also server-initiated push notifications. These notification capabilities are provided by the gateway — connecting directly to a game node only yields one-to-one responses and cannot verify whether push notifications are delivered correctly
+  Game servers need to test not only request-response logic but also server-initiated push notifications. These notification capabilities are provided by the gateway 鈥?connecting directly to a game node only yields one-to-one responses and cannot verify whether push notifications are delivered correctly
 
-FlowPacket solves these problems with a **visual canvas** — model protocol messages as nodes, define execution order with connections, and run complete test flows in a WYSIWYG manner.
+LinkWeaver solves these problems with a **visual canvas** 鈥?model protocol messages as nodes, define execution order with connections, and run complete test flows in a WYSIWYG manner.
 
-## 👀 Preview
+## 馃憖 Preview
 
 ![Preview](./docs/image/review.png)
 
@@ -55,7 +55,7 @@ FlowPacket solves these problems with a **visual canvas** — model protocol mes
 ![Custom Request Parameters](./docs/image/input_params.png)
 </details>
 
-## ✨ Key Features
+## 鉁?Key Features
 
 - Custom header protocol frames
 - Drag-and-drop canvas to build test cases
@@ -64,11 +64,11 @@ FlowPacket solves these problems with a **visual canvas** — model protocol mes
 - TCP / WebSocket long connections
 - Built-in support for popular game frameworks: Cherry / Due / Pomelo protocol frames
 
-## 🚀 Getting Started
+## 馃殌 Getting Started
 
 Download the installer from the release page: [Release page](https://github.com/guowei-gong/flow-packet/releases)
 
-## 🔨 Build from Source
+## 馃敤 Build from Source
 
 ```bash
 # Prerequisites: Node.js 18+, Go 1.21+
@@ -83,7 +83,7 @@ npm run dev
 cd apps/server/cmd/flow-packet/main.go
 ```
 
-## 🛠 Tech Stack
+## 馃洜 Tech Stack
 
 | Layer    | Technology         |
 |----------|--------------------|
@@ -92,10 +92,11 @@ cd apps/server/cmd/flow-packet/main.go
 | Desktop  | Electron           |
 | Backend  | Go                 |
 
-## 👋 Contact
+## 馃憢 Contact
 
 WeChat: ggw1315
 
-## 🍉 Acknowledgments
+## 馃崏 Acknowledgments
 
-- Thanks to the [LINUX DO](https://linux.do/) community's open-source showcase for helping more people discover FlowPacket
+- Thanks to the [LINUX DO](https://linux.do/) community's open-source showcase for helping more people discover LinkWeaver
+

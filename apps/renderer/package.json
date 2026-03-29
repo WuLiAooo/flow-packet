@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.flow-packet.app",
-    "productName": "FlowPacket",
+    "productName": "LinkWeaver",
     "directories": {
       "output": "release"
     },
@@ -87,3 +87,4 @@
     "wait-on": "^9.0.3"
   }
 }
+

@@ -1,4 +1,4 @@
-﻿import { useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import {
   Plug,
@@ -6,7 +6,6 @@ import {
   Pencil,
   Trash2,
   GripVertical,
-  Github,
   Zap,
 } from 'lucide-react'
 import {
@@ -256,7 +255,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
               <SidebarMenuButton
                 className="data-[slot=sidebar-menu-button]:p-1.5!"
               >
-                <span className="text-base font-semibold">FlowPacket</span>
+                <span className="text-base font-semibold">LinkWeaver</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -392,3 +391,5 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
     </SidebarProvider>
   )
 }
+
+
