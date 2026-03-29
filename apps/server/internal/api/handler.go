@@ -25,10 +25,13 @@ type ConnState struct {
 	RouteMappings  map[string]RouteMapping
 }
 type AppState struct {
-	DataDir      string
-	TemplateFile string
-	mu           sync.RWMutex
-	connections  map[string]*ConnState
+	DataDir                 string
+	TemplateFile            string
+	CollectionFile          string
+	CollectionMigrationFile string
+	mu                      sync.RWMutex
+	connections             map[string]*ConnState
+	collectionsMigrated     bool
 }
 
 var connIDRe = regexp.MustCompile(`^conn_\d+_[a-z0-9]+$`)
@@ -144,9 +147,11 @@ func (rm RouteMapping) Key() string {
 }
 func NewAppState(dataDir string) *AppState {
 	return &AppState{
-		DataDir:      dataDir,
-		TemplateFile: filepath.Join(dataDir, "templates.json"),
-		connections:  make(map[string]*ConnState),
+		DataDir:                 dataDir,
+		TemplateFile:            filepath.Join(dataDir, "templates.json"),
+		CollectionFile:          filepath.Join(dataDir, "collections.json"),
+		CollectionMigrationFile: filepath.Join(dataDir, "collections.migrated"),
+		connections:             make(map[string]*ConnState),
 	}
 }
 func RegisterHandlers(srv *Server, state *AppState) {
@@ -544,14 +549,17 @@ type CollectionData struct {
 	Items   []CollectionItem   `json:"items"`
 }
 
+func emptyCollectionData() *CollectionData {
+	return &CollectionData{
+		Folders: []CollectionFolder{},
+		Items:   []CollectionItem{},
+	}
+}
 func readCollections(path string) (*CollectionData, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &CollectionData{
-				Folders: []CollectionFolder{},
-				Items:   []CollectionItem{},
-			}, nil
+			return emptyCollectionData(), nil
 		}
 		return nil, err
 	}
@@ -568,11 +576,162 @@ func readCollections(path string) (*CollectionData, error) {
 	return &col, nil
 }
 func writeCollections(path string, col *CollectionData) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(col, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+func makeUniqueCollectionID(base string, exists map[string]struct{}) string {
+	if base == "" {
+		base = "collection"
+	}
+	if _, ok := exists[base]; !ok {
+		return base
+	}
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%d", base, i)
+		if _, ok := exists[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+func mergeCollections(dst, src *CollectionData) bool {
+	if dst == nil || src == nil {
+		return false
+	}
+	if dst.Folders == nil {
+		dst.Folders = []CollectionFolder{}
+	}
+	if dst.Items == nil {
+		dst.Items = []CollectionItem{}
+	}
+
+	changed := false
+	folderIDs := make(map[string]struct{}, len(dst.Folders))
+	folderByID := make(map[string]CollectionFolder, len(dst.Folders))
+	for _, folder := range dst.Folders {
+		folderIDs[folder.ID] = struct{}{}
+		folderByID[folder.ID] = folder
+	}
+
+	folderIDMap := make(map[string]string, len(src.Folders))
+	newFolders := make([]CollectionFolder, 0, len(src.Folders))
+	for _, folder := range src.Folders {
+		if existing, ok := folderByID[folder.ID]; ok && existing.Name == folder.Name && existing.ParentID == folder.ParentID && existing.CreatedAt == folder.CreatedAt {
+			folderIDMap[folder.ID] = folder.ID
+			continue
+		}
+		copied := folder
+		copied.ID = makeUniqueCollectionID(folder.ID, folderIDs)
+		folderIDMap[folder.ID] = copied.ID
+		folderIDs[copied.ID] = struct{}{}
+		newFolders = append(newFolders, copied)
+		changed = true
+	}
+	for i := range newFolders {
+		if mappedParentID, ok := folderIDMap[newFolders[i].ParentID]; ok {
+			newFolders[i].ParentID = mappedParentID
+		}
+		dst.Folders = append(dst.Folders, newFolders[i])
+	}
+
+	itemIDs := make(map[string]struct{}, len(dst.Items))
+	itemByID := make(map[string]CollectionItem, len(dst.Items))
+	for _, item := range dst.Items {
+		itemIDs[item.ID] = struct{}{}
+		itemByID[item.ID] = item
+	}
+	for _, item := range src.Items {
+		mappedFolderID := item.FolderID
+		if value, ok := folderIDMap[item.FolderID]; ok {
+			mappedFolderID = value
+		}
+		if existing, ok := itemByID[item.ID]; ok && existing.Name == item.Name && existing.FolderID == mappedFolderID && string(existing.Nodes) == string(item.Nodes) && string(existing.Edges) == string(item.Edges) && existing.CreatedAt == item.CreatedAt && existing.UpdatedAt == item.UpdatedAt {
+			continue
+		}
+		copied := item
+		copied.ID = makeUniqueCollectionID(item.ID, itemIDs)
+		copied.FolderID = mappedFolderID
+		itemIDs[copied.ID] = struct{}{}
+		dst.Items = append(dst.Items, copied)
+		changed = true
+	}
+
+	return changed
+}
+func (s *AppState) ensureGlobalCollectionsMigrated() error {
+	s.mu.RLock()
+	if s.collectionsMigrated {
+		s.mu.RUnlock()
+		return nil
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.collectionsMigrated {
+		return nil
+	}
+
+	if _, err := os.Stat(s.CollectionMigrationFile); err == nil {
+		s.collectionsMigrated = true
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check collection migration marker: %w", err)
+	}
+
+	globalCollections, err := readCollections(s.CollectionFile)
+	if err != nil {
+		return fmt.Errorf("failed to read global collections: %w", err)
+	}
+
+	changed := false
+	connectionRoot := filepath.Join(s.DataDir, "connections")
+	entries, err := os.ReadDir(connectionRoot)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to scan connection collections: %w", err)
+		}
+	} else {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			legacyFile := filepath.Join(connectionRoot, entry.Name(), "collections.json")
+			if _, err := os.Stat(legacyFile); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return fmt.Errorf("failed to inspect legacy collections for %s: %w", entry.Name(), err)
+			}
+			legacyCollections, err := readCollections(legacyFile)
+			if err != nil {
+				return fmt.Errorf("failed to read legacy collections for %s: %w", entry.Name(), err)
+			}
+			if mergeCollections(globalCollections, legacyCollections) {
+				changed = true
+			}
+		}
+	}
+
+	if changed {
+		if err := writeCollections(s.CollectionFile, globalCollections); err != nil {
+			return fmt.Errorf("failed to write global collections: %w", err)
+		}
+	}
+	if err := os.MkdirAll(s.DataDir, 0755); err != nil {
+		return fmt.Errorf("failed to ensure data directory: %w", err)
+	}
+	if err := os.WriteFile(s.CollectionMigrationFile, []byte(time.Now().Format(time.RFC3339Nano)), 0644); err != nil {
+		return fmt.Errorf("failed to write collection migration marker: %w", err)
+	}
+
+	s.collectionsMigrated = true
+	return nil
 }
 func getCollectionFile(state *AppState, payload json.RawMessage) (string, error) {
 	var base struct {
@@ -584,11 +743,13 @@ func getCollectionFile(state *AppState, payload json.RawMessage) (string, error)
 	if base.ConnectionID == "" {
 		return "", fmt.Errorf("connectionId is required")
 	}
-	cs := state.GetConnState(base.ConnectionID)
-	if cs == nil {
+	if state.GetConnState(base.ConnectionID) == nil {
 		return "", fmt.Errorf("invalid connectionId: %s", base.ConnectionID)
 	}
-	return cs.CollectionFile, nil
+	if err := state.ensureGlobalCollectionsMigrated(); err != nil {
+		return "", err
+	}
+	return state.CollectionFile, nil
 }
 func makeCollectionListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {

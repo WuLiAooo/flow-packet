@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -177,7 +178,7 @@ func TestRouteSetListDelete(t *testing.T) {
 
 	connID := "conn_1_abc"
 
-	// 设置 route 映射
+	// 璁剧疆 route 鏄犲皠
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": connID,
 		"route":        1001,
@@ -188,7 +189,7 @@ func TestRouteSetListDelete(t *testing.T) {
 		t.Fatalf("set event = %q, want %q", resp.Event, "route.set")
 	}
 
-	// 列出 route 映射
+	// 鍒楀嚭 route 鏄犲皠
 	resp = wsRequest(t, ws, "2", "route.list", map[string]string{"connectionId": connID})
 	if resp.Event != "route.list" {
 		t.Fatalf("list event = %q, want %q", resp.Event, "route.list")
@@ -205,13 +206,13 @@ func TestRouteSetListDelete(t *testing.T) {
 		t.Fatalf("route = %d, want 1001", listResult.Routes[0].Route)
 	}
 
-	// 删除 route
+	// 鍒犻櫎 route
 	resp = wsRequest(t, ws, "3", "route.delete", map[string]any{"route": 1001, "connectionId": connID})
 	if resp.Event != "route.delete" {
 		t.Fatalf("delete event = %q, want %q", resp.Event, "route.delete")
 	}
 
-	// 验证已删除
+	// 楠岃瘉宸插垹闄?
 	resp = wsRequest(t, ws, "4", "route.list", map[string]string{"connectionId": connID})
 	payload, _ = json.Marshal(resp.Payload)
 	json.Unmarshal(payload, &listResult)
@@ -229,7 +230,7 @@ func TestRouteSetInvalid(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// route 为 0 应报错
+	// route 涓?0 搴旀姤閿?
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": "conn_1_abc",
 		"route":        0,
@@ -237,5 +238,146 @@ func TestRouteSetInvalid(t *testing.T) {
 	})
 	if resp.Event != "error" {
 		t.Fatalf("event = %q, want %q", resp.Event, "error")
+	}
+}
+
+func TestCollectionsAreSharedAcrossConnections(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "collection-global-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	state := NewAppState(tmpDir)
+	saveHandler := makeCollectionSaveHandler(state)
+	listHandler := makeCollectionListHandler(state)
+
+	payload, err := json.Marshal(map[string]any{
+		"connectionId": "conn_1_abc",
+		"name":         "Shared Flow",
+		"nodes":        json.RawMessage(`[{"id":"node-1"}]`),
+		"edges":        json.RawMessage(`[]`),
+	})
+	if err != nil {
+		t.Fatalf("marshal save payload: %v", err)
+	}
+	if _, err := saveHandler(payload); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+
+	payload, err = json.Marshal(map[string]any{
+		"connectionId": "conn_2_def",
+	})
+	if err != nil {
+		t.Fatalf("marshal list payload: %v", err)
+	}
+	result, err := listHandler(payload)
+	if err != nil {
+		t.Fatalf("list collections: %v", err)
+	}
+	collections, ok := result.(*CollectionData)
+	if !ok {
+		t.Fatalf("list result type = %T, want *CollectionData", result)
+	}
+	if len(collections.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(collections.Items))
+	}
+	if collections.Items[0].Name != "Shared Flow" {
+		t.Fatalf("item name = %q, want %q", collections.Items[0].Name, "Shared Flow")
+	}
+	if _, err := os.Stat(state.CollectionFile); err != nil {
+		t.Fatalf("global collection file missing: %v", err)
+	}
+}
+
+func TestLegacyCollectionsMigrateToGlobalFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "collection-migrate-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	legacyA := &CollectionData{
+		Folders: []CollectionFolder{{
+			ID:        "folder_1",
+			Name:      "Shared Folder",
+			ParentID:  "",
+			CreatedAt: 1,
+		}},
+		Items: []CollectionItem{{
+			ID:        "col_1",
+			Name:      "Case A",
+			FolderID:  "folder_1",
+			Nodes:     json.RawMessage(`[{"id":"node-a"}]`),
+			Edges:     json.RawMessage(`[]`),
+			CreatedAt: 1,
+			UpdatedAt: 1,
+		}},
+	}
+	legacyB := &CollectionData{
+		Folders: []CollectionFolder{},
+		Items: []CollectionItem{{
+			ID:        "col_2",
+			Name:      "Case B",
+			FolderID:  "",
+			Nodes:     json.RawMessage(`[{"id":"node-b"}]`),
+			Edges:     json.RawMessage(`[]`),
+			CreatedAt: 2,
+			UpdatedAt: 2,
+		}},
+	}
+	if err := writeCollections(filepath.Join(tmpDir, "connections", "conn_1_abc", "collections.json"), legacyA); err != nil {
+		t.Fatalf("write legacy collections A: %v", err)
+	}
+	if err := writeCollections(filepath.Join(tmpDir, "connections", "conn_2_def", "collections.json"), legacyB); err != nil {
+		t.Fatalf("write legacy collections B: %v", err)
+	}
+
+	state := NewAppState(tmpDir)
+	listHandler := makeCollectionListHandler(state)
+	payload, err := json.Marshal(map[string]any{
+		"connectionId": "conn_3_xyz",
+	})
+	if err != nil {
+		t.Fatalf("marshal list payload: %v", err)
+	}
+	result, err := listHandler(payload)
+	if err != nil {
+		t.Fatalf("list collections after migration: %v", err)
+	}
+	collections, ok := result.(*CollectionData)
+	if !ok {
+		t.Fatalf("list result type = %T, want *CollectionData", result)
+	}
+	if len(collections.Folders) != 1 {
+		t.Fatalf("folder count = %d, want 1", len(collections.Folders))
+	}
+	if len(collections.Items) != 2 {
+		t.Fatalf("item count = %d, want 2", len(collections.Items))
+	}
+	if _, err := os.Stat(state.CollectionMigrationFile); err != nil {
+		t.Fatalf("migration marker missing: %v", err)
+	}
+
+	globalCollections, err := readCollections(state.CollectionFile)
+	if err != nil {
+		t.Fatalf("read global collections: %v", err)
+	}
+	if len(globalCollections.Items) != 2 {
+		t.Fatalf("global item count = %d, want 2", len(globalCollections.Items))
+	}
+
+	state = NewAppState(tmpDir)
+	listHandler = makeCollectionListHandler(state)
+	result, err = listHandler(payload)
+	if err != nil {
+		t.Fatalf("list collections after restart: %v", err)
+	}
+	collections, ok = result.(*CollectionData)
+	if !ok {
+		t.Fatalf("list result type after restart = %T, want *CollectionData", result)
+	}
+	if len(collections.Items) != 2 {
+		t.Fatalf("item count after restart = %d, want 2", len(collections.Items))
 	}
 }
