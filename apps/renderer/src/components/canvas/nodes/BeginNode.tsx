@@ -1,4 +1,4 @@
-﻿import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
+import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
@@ -102,13 +102,14 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
         type="source"
         position={Position.Right}
         id="exec-out"
+        className="lw-node-handle lw-node-handle-begin"
         style={{
           top: '50%',
-          right: -8,
-          width: 14,
-          height: 14,
-          background: 'var(--status-success)',
-          border: '2px solid var(--card)',
+          right: -10,
+          width: 28,
+          height: 28,
+          background: 'transparent',
+          border: 'none',
           transform: 'translateY(-50%)',
         }}
       />

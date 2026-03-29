@@ -1,11 +1,11 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* 鑺傜偣/寮曡剼/杩炵嚎 棰嗗煙涓撳睘鍙橀噺 鈥?鐧藉ぉ妯″紡 */
+  /* 閼哄倻鍋?瀵洝鍓?鏉╃偟鍤?妫板棗鐓欐稉鎾崇潣閸欐﹢鍣?閳?閻ц棄銇夊Ο鈥崇础 */
   --node-bg: #F0F0FA;
   --node-title-request: #1B6EF3;
   --node-title-condition: #2ECC71;
@@ -26,7 +26,7 @@
   --status-error: #E74C3C;
   --status-warning: #F39C12;
 
-  /* 鍖哄煙搴曡壊锛堝弬鑰?VS Code 娣辨祬灞傜骇锛?*/
+  /* 閸栧搫鐓欐惔鏇″閿涘牆寮懓?VS Code 濞ｈ鲸绁仦鍌滈獓閿?*/
   --bg-toolbar: oklch(0.955 0.001 285.0);
   --bg-activity: oklch(0.950 0.001 285.0);
   --bg-controller: oklch(0.965 0.001 285.0);
@@ -69,13 +69,13 @@
 }
 
 .dark {
-  /* 鑺傜偣/寮曡剼/杩炵嚎 棰嗗煙涓撳睘鍙橀噺 鈥?榛戝妯″紡瑕嗙洊 */
+  /* 閼哄倻鍋?瀵洝鍓?鏉╃偟鍤?妫板棗鐓欐稉鎾崇潣閸欐﹢鍣?閳?姒涙垵顧佸Ο鈥崇础鐟曞棛娲?*/
   --node-bg: #2A2A4A;
   --edge-exec: #FFFFFF;
   --pin-int: #7ED6DF;
   --primary-bright: #4ade80;
 
-  /* 鍖哄煙搴曡壊锛堝弬鑰?VS Code 娣辨祬灞傜骇锛?*/
+  /* 閸栧搫鐓欐惔鏇″閿涘牆寮懓?VS Code 濞ｈ鲸绁仦鍌滈獓閿?*/
   --bg-toolbar: oklch(0.185 0.005 285.8);
   --bg-activity: oklch(0.180 0.005 285.8);
   --bg-controller: oklch(0.165 0.005 285.8);
@@ -198,17 +198,17 @@
   cursor: default !important;
 }
 
-/* 澶囨敞鑺傜偣濮嬬粓鍦ㄤ笟鍔¤妭鐐逛笅鏂?*/
+/* 婢跺洦鏁為懞鍌滃仯婵绮撻崷銊ょ瑹閸斅ゅΝ閻愰€涚瑓閺?*/
 .react-flow__node-commentNode {
   z-index: -1 !important;
 }
 
-/* 鑺傜偣閫変腑骞虫粦杩囨浮 */
+/* 閼哄倻鍋ｉ柅澶夎厬楠炶櫕绮︽潻鍥ㄦ诞 */
 .react-flow__node.selected {
   transition: box-shadow 0.3s ease;
 }
 
-/* 鑺傜偣 running 鑴夊啿鍔ㄧ敾 */
+/* 閼哄倻鍋?running 閼村鍟块崝銊ф暰 */
 @keyframes node-pulse {
   0%, 100% { box-shadow: 0 0 0 1px var(--status-warning); }
   50% { box-shadow: 0 0 8px 2px var(--status-warning); }
@@ -272,12 +272,12 @@
   pointer-events: none;
   animation: begin-node-ready-ring-spin 1.4s linear infinite;
 }
-/* 杈?dash 娴佸姩鍔ㄧ敾 */
+/* 鏉?dash 濞翠礁濮╅崝銊ф暰 */
 @keyframes edge-dash {
   to { stroke-dashoffset: -10; }
 }
 
-/* Sonner toast dark mode - 瑕嗙洊榛樿绾粦 #000 涓烘繁鐏?*/
+/* Sonner toast dark mode - 鐟曞棛娲婃妯款吇缁绢垶绮?#000 娑撶儤绻侀悘?*/
 [data-sonner-toaster][data-sonner-theme="dark"] {
   --normal-bg: #1c1c1c !important;
   --normal-bg-hover: #262626 !important;
@@ -297,3 +297,22 @@
 
 
 
+
+.react-flow__node-requestNode .react-flow__handle,
+.react-flow__node-waitResponseNode .react-flow__handle {
+  width: 28px !important;
+  height: 28px !important;
+}
+.lw-node-handle-begin::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--status-success);
+  border: 2px solid var(--card);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
