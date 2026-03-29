@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
 import type { AnyNodeData } from './canvasStore'
 import { normalizeCanvasGraph, useCanvasStore } from './canvasStore'
@@ -37,6 +37,14 @@ interface TabStore {
 }
 
 const STORAGE_KEY = 'flow-packet-tabs-by-connection'
+const PERSIST_DEBOUNCE_MS = 500
+
+interface PendingTabPersist {
+  connectionId: string
+  tabs: CanvasTab[]
+  activeTabId: string | null
+}
+
 
 function createDefaultTab(): CanvasTab {
   const canvas = normalizeCanvasGraph([], [])
@@ -129,15 +137,64 @@ function persistConnectionTabs(connectionId: string, tabs: CanvasTab[], activeTa
   persistSessions(sessions)
 }
 
+let pendingTabPersist: PendingTabPersist | null = null
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let persistLifecycleBound = false
+
+function flushPendingTabPersistence() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (!pendingTabPersist) return
+
+  const { connectionId, tabs, activeTabId } = pendingTabPersist
+  pendingTabPersist = null
+  persistConnectionTabs(connectionId, tabs, activeTabId)
+}
+
+function scheduleConnectionTabsPersistence(connectionId: string, tabs: CanvasTab[], activeTabId: string | null) {
+  pendingTabPersist = { connectionId, tabs, activeTabId }
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+  }
+  persistTimer = setTimeout(() => {
+    flushPendingTabPersistence()
+  }, PERSIST_DEBOUNCE_MS)
+}
+
+function bindPersistLifecycleEvents() {
+  if (persistLifecycleBound || typeof window === 'undefined') return
+  persistLifecycleBound = true
+
+  const flush = () => flushPendingTabPersistence()
+  window.addEventListener('pagehide', flush)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushPendingTabPersistence()
+    }
+  })
+}
+
 function persistActiveConnectionTabs(snapshot: { tabs: CanvasTab[]; activeTabId: string | null }) {
   const connectionId = useConnectionStore.getState().activeConnectionId
   if (!connectionId) return
+  pendingTabPersist = null
+  flushPendingTabPersistence()
   persistConnectionTabs(connectionId, snapshot.tabs, snapshot.activeTabId)
+}
+
+function schedulePersistActiveConnectionTabs(snapshot: { tabs: CanvasTab[]; activeTabId: string | null }) {
+  const connectionId = useConnectionStore.getState().activeConnectionId
+  if (!connectionId) return
+  scheduleConnectionTabsPersistence(connectionId, snapshot.tabs, snapshot.activeTabId)
 }
 
 let _switching = false
 
 const defaultSession = createFallbackSession()
+
+bindPersistLifecycleEvents()
 
 export const useTabStore = create<TabStore>((set, get) => ({
   tabs: defaultSession.tabs,
@@ -200,6 +257,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
   persistTabsForConnection: (connectionId) => {
     get()._saveActiveTab()
     const { tabs, activeTabId } = get()
+    flushPendingTabPersistence()
     persistConnectionTabs(connectionId, tabs, activeTabId)
   },
 
@@ -345,6 +403,6 @@ useCanvasStore.subscribe((state, prev) => {
     ),
   }))
 
-  persistActiveConnectionTabs(useTabStore.getState())
+  schedulePersistActiveConnectionTabs(useTabStore.getState())
 })
 
