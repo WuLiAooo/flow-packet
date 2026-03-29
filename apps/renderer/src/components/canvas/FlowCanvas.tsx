@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react'
+import { Flag, Play } from 'lucide-react'
 import {
   ReactFlow,
   Background,
@@ -21,10 +22,12 @@ import type { ColorMode, Node } from '@xyflow/react'
 import { toast } from 'sonner'
 import { useCanvasStore, type AnyNodeData } from '@/stores/canvasStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import { useTheme } from '@/hooks/use-theme'
 import { useProtoStore } from '@/stores/protoStore'
 import { validateExecConnection } from '@/lib/flowGraph'
+import { runFlowFromBegin } from '@/lib/runFlowFromBegin'
 import { Button } from '@/components/ui/button'
 import { parseDraggedProtocolMessage, createRequestNode, createWaitResponseNode } from '@/lib/protocolNodes'
 import { BeginNode } from './nodes/BeginNode'
@@ -62,6 +65,13 @@ function buildBeginEdge(beginId: string, targetId: string): Edge {
   }
 }
 
+function replaceBeginEdge(edges: Edge[], beginId: string, targetId: string): Edge[] {
+  const withoutBeginEdges = edges.filter(
+    (edge) => !(edge.type === 'execEdge' && edge.source === beginId),
+  )
+  return [...withoutBeginEdges, buildBeginEdge(beginId, targetId)]
+}
+
 export function FlowCanvas() {
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
@@ -73,6 +83,7 @@ export function FlowCanvas() {
   const routeMappings = useProtoStore((s) => s.routeMappings)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const connState = useConnectionStore((s) => s.state)
+  const execStatus = useExecutionStore((s) => s.status)
   const clearSessionStatus = useSessionStatusStore((s) => s.clearStatus)
   const getSessionStatus = useSessionStatusStore((s) => s.getStatus)
   const theme = useTheme((s) => s.theme)
@@ -170,15 +181,54 @@ export function FlowCanvas() {
     }
 
     takeSnapshot()
-    updateEdges((currentEdges) => {
-      const withoutBeginEdges = currentEdges.filter(
-        (edge) => !(edge.type === 'execEdge' && edge.source === beginNode.id),
-      )
-      return [...withoutBeginEdges, buildBeginEdge(beginNode.id, nextTargetId)]
-    })
+    updateEdges((currentEdges) => replaceBeginEdge(currentEdges, beginNode.id, nextTargetId))
     setNodeMenu(null)
     toast.success('Begin target updated')
   }, [edges, nodeMenu, nodes, takeSnapshot, updateEdges])
+
+  const handleRunFromNodeMenu = useCallback(async () => {
+    if (!nodeMenu || nodeMenu.nodeType !== 'requestNode') return
+
+    const beginNode = nodes.find((node) => node.type === 'beginNode')
+    if (!beginNode) {
+      setNodeMenu(null)
+      toast.error('Begin node is missing')
+      return
+    }
+
+    const nextTargetId = nodeMenu.nodeId
+    const currentEdge = edges.find((edge) => edge.type === 'execEdge' && edge.source === beginNode.id)
+    const shouldUpdateBeginTarget = currentEdge?.target !== nextTargetId
+    const nextEdges = shouldUpdateBeginTarget
+      ? replaceBeginEdge(edges, beginNode.id, nextTargetId)
+      : edges
+
+    if (shouldUpdateBeginTarget) {
+      takeSnapshot()
+      updateEdges(() => nextEdges)
+    }
+
+    setNodeMenu(null)
+
+    await runFlowFromBegin({
+      nodes,
+      edges: nextEdges,
+      activeConnectionId,
+      connectionState: connState,
+      executionStatus: execStatus,
+      getSessionStatus,
+    })
+  }, [
+    activeConnectionId,
+    connState,
+    edges,
+    execStatus,
+    getSessionStatus,
+    nodeMenu,
+    nodes,
+    takeSnapshot,
+    updateEdges,
+  ])
 
   const handleBeginLogin = useCallback(async () => {
     if (!nodeMenu || nodeMenu.nodeType !== 'beginNode') return
@@ -250,6 +300,7 @@ export function FlowCanvas() {
       setNodeMenu(null)
     }
   }, [activeConnectionId, nodeMenu, nodes])
+
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       useCanvasStore.getState().setEditingNodeId(node.id)
@@ -482,13 +533,24 @@ export function FlowCanvas() {
           onContextMenu={(event) => event.preventDefault()}
         >
           {nodeMenu.nodeType === 'requestNode' && (
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start px-2 text-sm"
-              onClick={handleSetAsBegin}
-            >
-              Set as Begin
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                className="h-8 w-full justify-start gap-2 px-2 text-sm"
+                onClick={handleRunFromNodeMenu}
+              >
+                <Play className="h-3.5 w-3.5 text-emerald-500" />
+                Run
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-8 w-full justify-start gap-2 px-2 text-sm"
+                onClick={handleSetAsBegin}
+              >
+                <Flag className="h-3.5 w-3.5 text-amber-500" />
+                Set as Begin
+              </Button>
+            </>
           )}
           {nodeMenu.nodeType === 'beginNode' && (
             <Button
@@ -516,10 +578,3 @@ export function FlowCanvas() {
     </div>
   )
 }
-
-
-
-
-
-
-

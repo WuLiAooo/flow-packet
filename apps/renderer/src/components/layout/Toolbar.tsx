@@ -5,10 +5,10 @@ import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
-import { executeFlow, connectTCP } from '@/services/api'
+import { connectTCP } from '@/services/api'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
-import { useCanvasStore, type BeginNodeData } from '@/stores/canvasStore'
-import { formatValidationMessage, getExecutableFlowFromBegin } from '@/lib/flowGraph'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { runFlowFromBegin } from '@/lib/runFlowFromBegin'
 import { toast } from 'sonner'
 
 const stateColors: Record<string, string> = {
@@ -75,60 +75,14 @@ export function Toolbar({ onBack }: ToolbarProps) {
   }
 
   const handleRun = async () => {
-    if (!isConnected || execStatus === 'running' || nodes.length === 0 || !activeConnectionId) return
-
-    const beginNode = nodes.find((node) => node.type === 'beginNode')
-    const beginData = beginNode?.data as BeginNodeData | undefined
-    const deviceId = typeof beginData?.deviceId === 'string' ? beginData.deviceId.trim() : ''
-    if (!deviceId) {
-      toast.error('Begin deviceId required', {
-        description: 'Double-click BeginNode and configure the deviceId before running this chain.',
-      })
-      return
-    }
-
-    const sessionStatus = getSessionStatus(activeConnectionId, deviceId)
-    if (sessionStatus?.state !== 'ready') {
-      toast.error('Begin session not ready', {
-        description: 'Right-click BeginNode and choose Login before running this chain.',
-      })
-      return
-    }
-
-    const executable = getExecutableFlowFromBegin(nodes, edges)
-    if (!executable.validation.valid) {
-      toast.error('Invalid flow', {
-        description: formatValidationMessage(executable.validation),
-      })
-      return
-    }
-
-    try {
-      const flowNodes = executable.nodes.map((node) => {
-        if (node.type === 'requestNode') {
-          return {
-            id: node.id,
-            type: 'request',
-            messageName: node.data.messageName,
-            route: node.data.route,
-            stringRoute: node.data.stringRoute,
-            fields: node.data.fields,
-          }
-        }
-        return {
-          id: node.id,
-          type: 'wait_response',
-          messageName: node.data.messageName,
-          route: node.data.route,
-          stringRoute: node.data.stringRoute,
-          fields: {},
-        }
-      })
-      const flowEdges = executable.edges.map((edge) => ({ source: edge.source, target: edge.target }))
-      await executeFlow(flowNodes, flowEdges, activeConnectionId, deviceId)
-    } catch {
-      // handled by event
-    }
+    await runFlowFromBegin({
+      nodes,
+      edges,
+      activeConnectionId,
+      connectionState: connState,
+      executionStatus: execStatus,
+      getSessionStatus,
+    })
   }
 
   return (
@@ -182,6 +136,3 @@ export function Toolbar({ onBack }: ToolbarProps) {
     </div>
   )
 }
-
-
-
