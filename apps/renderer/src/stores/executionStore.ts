@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 
 export type ExecutionStatus = 'idle' | 'running' | 'completed' | 'error' | 'stopped'
 const MAX_LOGS = 200
@@ -26,6 +26,18 @@ export interface NodeOutput {
   timestamp: number
 }
 
+function filterRuntimeRecord<T>(record: Record<string, T>, keepIds: Set<string>): Record<string, T> {
+  const nextRecord: Record<string, T> = {}
+
+  for (const [nodeId, value] of Object.entries(record)) {
+    if (keepIds.has(nodeId)) {
+      nextRecord[nodeId] = value
+    }
+  }
+
+  return nextRecord
+}
+
 interface ExecutionStore {
   status: ExecutionStatus
   logs: LogEntry[]
@@ -39,6 +51,8 @@ interface ExecutionStore {
   resetNodeStatuses: () => void
   setNodeOutput: (nodeId: string, output: NodeOutput) => void
   clearNodeOutputs: () => void
+  clearNodeRuntime: (nodeId: string) => void
+  pruneNodeRuntime: (nodeIds: string[]) => void
 }
 
 export const useExecutionStore = create<ExecutionStore>((set) => ({
@@ -63,4 +77,38 @@ export const useExecutionStore = create<ExecutionStore>((set) => ({
       nodeOutputs: { ...s.nodeOutputs, [nodeId]: output },
     })),
   clearNodeOutputs: () => set({ nodeOutputs: {} }),
+  clearNodeRuntime: (nodeId) =>
+    set((s) => {
+      if (!(nodeId in s.nodeStatuses) && !(nodeId in s.nodeOutputs)) {
+        return s
+      }
+
+      const nextStatuses = { ...s.nodeStatuses }
+      const nextOutputs = { ...s.nodeOutputs }
+      delete nextStatuses[nodeId]
+      delete nextOutputs[nodeId]
+
+      return {
+        nodeStatuses: nextStatuses,
+        nodeOutputs: nextOutputs,
+      }
+    }),
+  pruneNodeRuntime: (nodeIds) =>
+    set((s) => {
+      const keepIds = new Set(nodeIds)
+      const nextStatuses = filterRuntimeRecord(s.nodeStatuses, keepIds)
+      const nextOutputs = filterRuntimeRecord(s.nodeOutputs, keepIds)
+
+      if (
+        Object.keys(nextStatuses).length === Object.keys(s.nodeStatuses).length &&
+        Object.keys(nextOutputs).length === Object.keys(s.nodeOutputs).length
+      ) {
+        return s
+      }
+
+      return {
+        nodeStatuses: nextStatuses,
+        nodeOutputs: nextOutputs,
+      }
+    }),
 }))

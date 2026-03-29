@@ -1,5 +1,6 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import type { Node, Edge } from '@xyflow/react'
+import { useExecutionStore } from '@/stores/executionStore'
 
 export interface BeginNodeData {
   label: string
@@ -39,6 +40,33 @@ interface Snapshot {
 
 const MAX_HISTORY = 50
 const BEGIN_LABEL = 'Begin'
+const NODE_EDIT_SNAPSHOT_WINDOW_MS = 800
+
+let lastNodeEditSnapshot: { nodeId: string; at: number } | null = null
+
+function resetNodeEditSnapshotWindow() {
+  lastNodeEditSnapshot = null
+}
+
+function shouldTakeNodeEditSnapshot(nodeId: string): boolean {
+  const now = Date.now()
+
+  if (
+    !lastNodeEditSnapshot ||
+    lastNodeEditSnapshot.nodeId !== nodeId ||
+    now - lastNodeEditSnapshot.at > NODE_EDIT_SNAPSHOT_WINDOW_MS
+  ) {
+    lastNodeEditSnapshot = { nodeId, at: now }
+    return true
+  }
+
+  lastNodeEditSnapshot = { nodeId, at: now }
+  return false
+}
+
+function pruneExecutionRuntime(nodes: Node<AnyNodeData>[]) {
+  useExecutionStore.getState().pruneNodeRuntime(nodes.map((node) => node.id))
+}
 
 export function createBeginNode(): Node<AnyNodeData> {
   return {
@@ -126,40 +154,52 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   past: [],
   future: [],
 
-  takeSnapshot: () =>
+  takeSnapshot: () => {
+    resetNodeEditSnapshotWindow()
     set((s) => ({
       past: [...s.past.slice(-(MAX_HISTORY - 1)), { nodes: s.nodes, edges: s.edges }],
       future: [],
-    })),
+    }))
+  },
 
   undo: () => {
     const { past, nodes, edges } = get()
     if (past.length === 0) return
+
     const prev = normalizeCanvasGraph(past[past.length - 1].nodes, past[past.length - 1].edges)
+    resetNodeEditSnapshotWindow()
     set({
       past: past.slice(0, -1),
       future: [{ nodes, edges }, ...get().future],
       nodes: prev.nodes,
       edges: prev.edges,
     })
+    pruneExecutionRuntime(prev.nodes)
   },
 
   redo: () => {
     const { future, nodes, edges } = get()
     if (future.length === 0) return
+
     const next = normalizeCanvasGraph(future[0].nodes, future[0].edges)
+    resetNodeEditSnapshotWindow()
     set({
       future: future.slice(1),
       past: [...get().past, { nodes, edges }],
       nodes: next.nodes,
       edges: next.edges,
     })
+    pruneExecutionRuntime(next.nodes)
   },
 
   canUndo: () => get().past.length > 0,
   canRedo: () => get().future.length > 0,
 
-  setNodes: (nodes) => set((s) => ({ nodes: normalizeNodes(nodes), edges: s.edges })),
+  setNodes: (nodes) => {
+    const normalizedNodes = normalizeNodes(nodes)
+    set((s) => ({ nodes: normalizedNodes, edges: s.edges }))
+    pruneExecutionRuntime(normalizedNodes)
+  },
   setEdges: (edges) => set({ edges }),
   updateNodes: (updater) => set((s) => ({ nodes: normalizeNodes(updater(s.nodes)) })),
   updateEdges: (updater) => set((s) => ({ edges: updater(s.edges) })),
@@ -169,7 +209,11 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const node = get().nodes.find((item) => item.id === nodeId)
     if (!node) return
 
-    get().takeSnapshot()
+    if (shouldTakeNodeEditSnapshot(nodeId)) {
+      get().takeSnapshot()
+      lastNodeEditSnapshot = { nodeId, at: Date.now() }
+    }
+
     set((s) => ({
       nodes: s.nodes.map((n) =>
         n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n,
@@ -186,13 +230,13 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     if (!node || isBeginNode(node)) return
 
     get().takeSnapshot()
+    resetNodeEditSnapshotWindow()
     set((s) => ({
       nodes: s.nodes.filter((n) => n.id !== nodeId),
       edges: s.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
       selectedNodeId: s.selectedNodeId === nodeId ? null : s.selectedNodeId,
       editingNodeId: s.editingNodeId === nodeId ? null : s.editingNodeId,
     }))
+    useExecutionStore.getState().clearNodeRuntime(nodeId)
   },
 }))
-
-
