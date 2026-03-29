@@ -24,7 +24,7 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
 
   const matchCount = useMemo(() => {
     if (!output || !deferredQuery) return 0
-    return countMatches(output.data, deferredQuery)
+    return countTreeMatches('', output.data, deferredQuery)
   }, [output, deferredQuery])
 
   const hasMatch = !deferredQuery || matchCount > 0
@@ -142,12 +142,26 @@ function JsonTree({
   const [open, setOpen] = useState(defaultOpen)
   const forceOpen = searchQuery.length > 0 && treeContainsMatch(name, value, searchQuery)
   const isOpen = open || forceOpen
+  const formattedName = formatFieldName(name)
 
   if (!isContainer(value)) {
+    const primitiveText = formatPrimitive(value)
+    const leafText = getLeafSearchText(name, value)
+
     return (
       <div className="min-w-0 break-all whitespace-pre-wrap leading-5 text-xs">
-        {name ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{highlightText(name, searchQuery)}: </span> : null}
-        <span className="min-w-0 break-all whitespace-pre-wrap text-foreground">{highlightText(formatPrimitive(value), searchQuery)}</span>
+        {searchQuery ? (
+          <span className="min-w-0 break-all whitespace-pre-wrap text-foreground">
+            {highlightText(leafText, searchQuery)}
+          </span>
+        ) : (
+          <>
+            {formattedName ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{formattedName}</span> : null}
+            <span className={formattedName ? 'ml-1 min-w-0 break-all whitespace-pre-wrap text-foreground' : 'min-w-0 break-all whitespace-pre-wrap text-foreground'}>
+              {primitiveText}
+            </span>
+          </>
+        )}
       </div>
     )
   }
@@ -166,7 +180,7 @@ function JsonTree({
         }}
       >
         <span className="text-muted-foreground">{isOpen ? 'v' : '>'}</span>
-        {name ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{highlightText(name, searchQuery)}</span> : null}
+        {formattedName ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{highlightText(formattedName, searchQuery)}</span> : null}
         <span className="min-w-0 break-all whitespace-pre-wrap text-muted-foreground">{summarizeContainer(value)}</span>
       </button>
       {isOpen && (
@@ -217,17 +231,33 @@ function summarizeContainer(value: Record<string, unknown> | unknown[]): string 
   return `{${Object.keys(value).length}}`
 }
 
-function countMatches(value: unknown, query: string): number {
+function formatFieldName(name: string): string {
+  return name ? `${name}:` : ''
+}
+
+function getLeafSearchText(name: string, value: unknown): string {
+  return `${formatFieldName(name)}${formatPrimitive(value)}`
+}
+
+function countTreeMatches(name: string, value: unknown, query: string): number {
   if (!query) return 0
+
   if (!isContainer(value)) {
-    return countTextMatches(formatPrimitive(value), query)
+    return countTextMatches(getLeafSearchText(name, value), query)
   }
+
+  const nameMatches = name ? countTextMatches(formatFieldName(name), query) : 0
+
   if (Array.isArray(value)) {
-    return value.reduce<number>((total, item, index) => total + countTextMatches(String(index), query) + countMatches(item, query), 0)
+    return value.reduce<number>(
+      (total, item, index) => total + countTreeMatches(String(index), item, query),
+      nameMatches,
+    )
   }
+
   return Object.entries(value).reduce<number>(
-    (total, [key, item]) => total + countTextMatches(key, query) + countMatches(item, query),
-    0,
+    (total, [key, item]) => total + countTreeMatches(key, item, query),
+    nameMatches,
   )
 }
 
@@ -247,8 +277,8 @@ function countTextMatches(text: string, query: string): number {
 }
 
 function treeContainsMatch(name: string, value: unknown, query: string): boolean {
-  if (name && textMatches(name, query)) return true
-  if (!isContainer(value)) return textMatches(formatPrimitive(value), query)
+  if (name && textMatches(formatFieldName(name), query)) return true
+  if (!isContainer(value)) return textMatches(getLeafSearchText(name, value), query)
   if (Array.isArray(value)) {
     return value.some((item, index) => treeContainsMatch(String(index), item, query))
   }
@@ -288,7 +318,3 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
-
-
-
-
