@@ -1,4 +1,4 @@
-import { useCanvasStore, type BeginNodeData, type CommentNodeData } from '@/stores/canvasStore'
+﻿import { useCanvasStore, type BeginNodeData, type CommentNodeData } from '@/stores/canvasStore'
 import { FieldEditor } from './FieldEditor'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
@@ -105,7 +105,7 @@ export function PropertySheet() {
         if (!open) setEditingNodeId(null)
       }}
     >
-      <SheetContent side="right" className="w-[420px] sm:max-w-[420px]" showCloseButton={false}>
+      <SheetContent side="right" className="w-[420px] overflow-x-hidden sm:max-w-[420px]" showCloseButton={false}>
         <SheetHeader>
           <SheetTitle className="text-sm">
             {isBegin
@@ -126,7 +126,7 @@ export function PropertySheet() {
                   : 'Edit request fields and inspect the latest runtime payload.'}
           </SheetDescription>
         </SheetHeader>
-        <div className="grid flex-1 auto-rows-min gap-6 overflow-y-auto px-4">
+        <div className="grid min-w-0 flex-1 auto-rows-min gap-6 overflow-y-auto overflow-x-hidden px-4">
           {editingNodeId && (
             isBegin
               ? <BeginEditor nodeId={editingNodeId} />
@@ -161,4 +161,5 @@ export function PropertySheet() {
     </Sheet>
   )
 }
+
 

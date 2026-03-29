@@ -69,7 +69,7 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
   }, [jumpToMatch])
 
   return (
-    <div className="grid gap-3">
+    <div className="grid min-w-0 gap-3">
       <div>
         <div className="text-xs font-medium text-foreground">Latest Response</div>
         <div className="text-[11px] text-muted-foreground">
@@ -79,7 +79,7 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
 
       {output && (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <div className="relative min-w-[270px] flex-1 max-w-[420px]">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -107,14 +107,16 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
             )}
           </div>
 
-          <div className="rounded-md border border-border/70 bg-muted/20">
+          <div className="min-w-0 overflow-hidden rounded-md border border-border/70 bg-muted/20">
             <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
               <span className="truncate">{output.messageName?.split('.').pop() ?? 'Message'}</span>
               {output.duration !== undefined && <span>{output.duration}ms</span>}
             </div>
-            <div ref={contentRef} className="max-h-[420px] overflow-y-auto px-3 py-3">
+            <div ref={contentRef} className="max-h-[420px] overflow-y-auto overflow-x-hidden px-3 py-3">
               {hasMatch ? (
-                <JsonTree name="" value={output.data} defaultOpen searchQuery={deferredQuery} />
+                <div className="pr-2">
+                  <JsonTree name="" value={output.data} defaultOpen searchQuery={deferredQuery} />
+                </div>
               ) : (
                 <div className="text-xs text-muted-foreground">No fields match the current search.</div>
               )}
@@ -143,9 +145,9 @@ function JsonTree({
 
   if (!isContainer(value)) {
     return (
-      <div className="leading-5 text-xs">
-        {name ? <span className="text-[#7aa2f7]">{highlightText(name, searchQuery)}: </span> : null}
-        <span className="text-foreground">{highlightText(formatPrimitive(value), searchQuery)}</span>
+      <div className="min-w-0 break-all whitespace-pre-wrap leading-5 text-xs">
+        {name ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{highlightText(name, searchQuery)}: </span> : null}
+        <span className="min-w-0 break-all whitespace-pre-wrap text-foreground">{highlightText(formatPrimitive(value), searchQuery)}</span>
       </div>
     )
   }
@@ -155,20 +157,20 @@ function JsonTree({
     : Object.entries(value)
 
   return (
-    <div className="leading-5 text-xs">
+    <div className="min-w-0 break-all whitespace-pre-wrap leading-5 text-xs">
       <button
         type="button"
-        className="inline-flex items-center gap-1 text-left text-foreground"
+        className="flex w-full min-w-0 flex-wrap items-start gap-1 break-all text-left text-foreground"
         onClick={() => {
           if (!forceOpen) setOpen((current) => !current)
         }}
       >
         <span className="text-muted-foreground">{isOpen ? 'v' : '>'}</span>
-        {name ? <span className="text-[#7aa2f7]">{highlightText(name, searchQuery)}</span> : null}
-        <span className="text-muted-foreground">{summarizeContainer(value)}</span>
+        {name ? <span className="min-w-0 break-all whitespace-pre-wrap text-[#7aa2f7]">{highlightText(name, searchQuery)}</span> : null}
+        <span className="min-w-0 break-all whitespace-pre-wrap text-muted-foreground">{summarizeContainer(value)}</span>
       </button>
       {isOpen && (
-        <div className="ml-4 border-l border-border/60 pl-3">
+        <div className="ml-4 min-w-0 border-l border-border/60 pl-3">
           {entries.map(([childName, childValue]) => (
             <JsonTree key={childName} name={childName} value={childValue} searchQuery={searchQuery} />
           ))}
@@ -286,4 +288,7 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
+
+
+
 
