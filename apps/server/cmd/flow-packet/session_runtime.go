@@ -79,9 +79,11 @@ type flowSession struct {
 	loggedIn          bool
 	notifyStatus      func(payload sessionStatusPayload)
 	notifyPacket      func(payload packetLogPayload)
+	onTerminal        func(session *flowSession)
+	terminalNotified  bool
 }
 
-func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *loginMessagePlan, enterGamePlan *loginMessagePlan, closePlan *syncMessagePlan, syncPlan *syncMessagePlan, notifyStatus func(payload sessionStatusPayload), notifyPacket func(payload packetLogPayload)) *flowSession {
+func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *loginMessagePlan, enterGamePlan *loginMessagePlan, closePlan *syncMessagePlan, syncPlan *syncMessagePlan, notifyStatus func(payload sessionStatusPayload), notifyPacket func(payload packetLogPayload), onTerminal func(session *flowSession)) *flowSession {
 	// TopHero business sessions use CgSynchronizeTime as the app-level heartbeat.
 	// Disable raw transport heartbeat here to avoid sending heartbeat frames the server may not expect.
 	if syncPlan != nil {
@@ -108,6 +110,7 @@ func newFlowSession(config connectionRuntimeConfig, deviceID string, loginPlan *
 		state:             "disconnected",
 		notifyStatus:      notifyStatus,
 		notifyPacket:      notifyPacket,
+		onTerminal:        onTerminal,
 	}
 
 	runner.SetSendFunc(func(data []byte) error {
@@ -160,6 +163,7 @@ func (s *flowSession) handleConnect(_ network.Conn) {
 	}
 	s.mu.Lock()
 	s.loggedIn = false
+	s.terminalNotified = false
 	s.mu.Unlock()
 	s.setState("connected", "")
 }
@@ -169,12 +173,17 @@ func (s *flowSession) handleDisconnect(_ network.Conn, err error) {
 	s.stopSyncLoop()
 	s.mu.Lock()
 	s.loggedIn = false
+	currentState := s.state
 	s.mu.Unlock()
 	if err != nil {
 		s.setState("error", err.Error())
+		s.notifyTerminalState()
 		return
 	}
-	s.setState("disconnected", "")
+	if currentState != "error" {
+		s.setState("disconnected", "")
+	}
+	s.notifyTerminalState()
 }
 
 func (s *flowSession) connect() error {
@@ -293,11 +302,16 @@ func (s *flowSession) logout() error {
 	return nil
 }
 
-func (s *flowSession) close() {
+func (s *flowSession) dispose() {
 	s.stopSyncLoop()
 	s.runner.Stop()
 	s.heartbeat.Stop()
 	_ = s.client.Disconnect()
+	s.notifyTerminalState()
+}
+
+func (s *flowSession) close() {
+	s.dispose()
 	s.setState("disconnected", "")
 }
 
@@ -456,6 +470,21 @@ func (s *flowSession) setState(state string, lastError string) {
 	}
 }
 
+func (s *flowSession) notifyTerminalState() {
+	s.mu.Lock()
+	if s.terminalNotified {
+		s.mu.Unlock()
+		return
+	}
+	s.terminalNotified = true
+	onTerminal := s.onTerminal
+	s.mu.Unlock()
+
+	if onTerminal != nil {
+		onTerminal(s)
+	}
+}
+
 type flowSessionManager struct {
 	mu           sync.RWMutex
 	configs      map[string]connectionRuntimeConfig
@@ -471,6 +500,17 @@ func newFlowSessionManager(notifyStatus func(payload sessionStatusPayload), noti
 		notifyStatus: notifyStatus,
 		notifyPacket: notifyPacket,
 	}
+}
+
+func (m *flowSessionManager) removeSessionIfSame(session *flowSession) {
+	if session == nil {
+		return
+	}
+	m.mu.Lock()
+	if current := m.sessions[session.key]; current == session {
+		delete(m.sessions, session.key)
+	}
+	m.mu.Unlock()
 }
 
 func (m *flowSessionManager) SetConnectionConfig(config connectionRuntimeConfig) {
@@ -559,7 +599,7 @@ func (m *flowSessionManager) EnsureSession(connectionID string, deviceID string,
 		return nil, err
 	}
 
-	session = newFlowSession(config, deviceID, loginPlan, enterGamePlan, closePlan, syncPlan, m.notifyStatus, m.notifyPacket)
+	session = newFlowSession(config, deviceID, loginPlan, enterGamePlan, closePlan, syncPlan, m.notifyStatus, m.notifyPacket, m.removeSessionIfSame)
 	if err := configureRunnerForConnState(session.runner, cs); err != nil {
 		session.close()
 		return nil, err

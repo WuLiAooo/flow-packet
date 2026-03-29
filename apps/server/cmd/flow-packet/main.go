@@ -318,6 +318,7 @@ func registerFlowHandlers(srv *api.Server, legacyRunner *engine.Runner, state *a
 			return nil, err
 		}
 		if err := session.ensureLoggedIn(); err != nil {
+			session.dispose()
 			return nil, err
 		}
 		return map[string]string{"status": "ready"}, nil
