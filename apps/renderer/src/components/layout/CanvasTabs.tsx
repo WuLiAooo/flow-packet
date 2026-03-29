@@ -128,6 +128,13 @@ export function CanvasTabs() {
     setPendingSave({ tab, intent: 'close' })
   }
 
+  const handleContextClose = (tab: CanvasTab) => {
+    if (pendingSave?.tab.id === tab.id) {
+      setPendingSave(null)
+    }
+    closeTab(tab.id)
+  }
+
   const handleSaveDialogConfirm = async (name: string, folderId: string) => {
     if (!pendingSave || !activeConnectionId) return
 
@@ -241,7 +248,7 @@ export function CanvasTabs() {
                     <Save className="size-4" />
                     <span>Save</span>
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => void handleCloseClick(tab)}>
+                  <ContextMenuItem onClick={() => handleContextClose(tab)}>
                     Close
                   </ContextMenuItem>
                 </ContextMenuContent>
