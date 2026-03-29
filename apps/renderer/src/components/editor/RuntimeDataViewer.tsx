@@ -9,7 +9,7 @@
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { useExecutionStore } from '@/stores/executionStore'
 
@@ -62,11 +62,20 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
     setActiveMatchIndex((current) => (current + 1 >= matchCount ? 0 : current + 1))
   }, [matchCount])
 
+  const jumpToPreviousMatch = useCallback(() => {
+    if (matchCount === 0) return
+    setActiveMatchIndex((current) => (current - 1 < 0 ? matchCount - 1 : current - 1))
+  }, [matchCount])
+
   const handleSearchKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter') return
     event.preventDefault()
+    if (event.shiftKey) {
+      jumpToPreviousMatch()
+      return
+    }
     jumpToMatch()
-  }, [jumpToMatch])
+  }, [jumpToMatch, jumpToPreviousMatch])
 
   return (
     <div className="grid min-w-0 gap-3">
@@ -101,8 +110,29 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
               )}
             </div>
             {deferredQuery && (
-              <div className="shrink-0 text-[10px] text-muted-foreground">
-                {matchCount > 0 ? `${activeMatchIndex + 1}/${matchCount}` : '0/0'}
+              <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={jumpToPreviousMatch}
+                  disabled={matchCount === 0}
+                  className="inline-flex size-6 items-center justify-center rounded border border-border/60 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Previous match (Shift+Enter)"
+                >
+                  <ChevronUp className="size-3" />
+                </button>
+                <span className="min-w-[32px] text-center">{matchCount > 0 ? `${activeMatchIndex + 1}/${matchCount}` : '0/0'}</span>
+                <button
+                  type="button"
+                  onClick={jumpToMatch}
+                  disabled={matchCount === 0}
+                  className="inline-flex size-6 items-center justify-center rounded border border-border/60 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Next match (Enter)"
+                >
+                  <ChevronDown className="size-3" />
+                </button>
+                <span className="hidden whitespace-nowrap text-[10px] text-muted-foreground/80 xl:inline">
+                  Shift+Enter / Enter
+                </span>
               </div>
             )}
           </div>
@@ -318,3 +348,6 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
+
+
+
