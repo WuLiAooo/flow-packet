@@ -18,25 +18,40 @@ const highlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transitio
 export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
   const output = useExecutionStore((s) => s.nodeOutputs[nodeId])
   const [query, setQuery] = useState('')
+  const [matchCount, setMatchCount] = useState(0)
   const [activeMatchIndex, setActiveMatchIndex] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
   const deferredQuery = useDeferredValue(query.trim().toLowerCase())
 
-  const matchCount = useMemo(() => {
-    if (!output || !deferredQuery) return 0
-    return countTreeMatches('', output.data, deferredQuery)
+  const hasMatch = useMemo(() => {
+    if (!output || !deferredQuery) return true
+    return treeContainsMatch('', output.data, deferredQuery)
   }, [output, deferredQuery])
 
-  const hasMatch = !deferredQuery || matchCount > 0
+  useEffect(() => {
+    setQuery('')
+    setMatchCount(0)
+    setActiveMatchIndex(0)
+  }, [nodeId])
 
   useEffect(() => {
-    if (!deferredQuery || matchCount === 0) {
+    if (!deferredQuery || !hasMatch) {
+      setMatchCount(0)
       setActiveMatchIndex(0)
       return
     }
 
-    setActiveMatchIndex((current) => (current >= matchCount ? 0 : current))
-  }, [deferredQuery, matchCount])
+    const frame = window.requestAnimationFrame(() => {
+      const hits = getSearchHits(contentRef.current)
+      setMatchCount(hits.length)
+      setActiveMatchIndex((current) => {
+        if (hits.length === 0) return 0
+        return current >= hits.length ? 0 : current
+      })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [deferredQuery, hasMatch, output])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -88,8 +103,8 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
 
       {output && (
         <>
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="relative min-w-[270px] flex-1 max-w-[420px]">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1 basis-[220px] sm:max-w-[280px]">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
@@ -110,7 +125,7 @@ export function RuntimeDataViewer({ nodeId }: { nodeId: string }) {
               )}
             </div>
             {deferredQuery && (
-              <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+              <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground sm:ml-auto">
                 <button
                   type="button"
                   onClick={jumpToPreviousMatch}
@@ -235,7 +250,7 @@ function scrollSearchHitIntoView(container: HTMLDivElement | null, target: HTMLE
   const containerRect = container.getBoundingClientRect()
   const targetRect = target.getBoundingClientRect()
   const targetTop = targetRect.top - containerRect.top + container.scrollTop
-  const nextScrollTop = Math.max(targetTop - 24, 0)
+  const nextScrollTop = Math.max(targetTop - container.clientHeight / 2 + targetRect.height / 2, 0)
 
   container.scrollTo({
     top: nextScrollTop,
@@ -267,43 +282,6 @@ function formatFieldName(name: string): string {
 
 function getLeafSearchText(name: string, value: unknown): string {
   return `${formatFieldName(name)}${formatPrimitive(value)}`
-}
-
-function countTreeMatches(name: string, value: unknown, query: string): number {
-  if (!query) return 0
-
-  if (!isContainer(value)) {
-    return countTextMatches(getLeafSearchText(name, value), query)
-  }
-
-  const nameMatches = name ? countTextMatches(formatFieldName(name), query) : 0
-
-  if (Array.isArray(value)) {
-    return value.reduce<number>(
-      (total, item, index) => total + countTreeMatches(String(index), item, query),
-      nameMatches,
-    )
-  }
-
-  return Object.entries(value).reduce<number>(
-    (total, [key, item]) => total + countTreeMatches(key, item, query),
-    nameMatches,
-  )
-}
-
-function countTextMatches(text: string, query: string): number {
-  const normalizedText = text.toLowerCase()
-  if (!query || !normalizedText.includes(query)) return 0
-
-  let count = 0
-  let start = 0
-  let index = normalizedText.indexOf(query, start)
-  while (index !== -1) {
-    count += 1
-    start = index + query.length
-    index = normalizedText.indexOf(query, start)
-  }
-  return count
 }
 
 function treeContainsMatch(name: string, value: unknown, query: string): boolean {
@@ -348,6 +326,3 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
-
-
-
