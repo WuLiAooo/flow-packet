@@ -1,5 +1,5 @@
 ﻿import { useRef, useState, useEffect, useCallback } from 'react'
-import { LayoutDashboard, Plus, X, ChevronLeft, ChevronRight, Save } from 'lucide-react'
+import { LayoutDashboard, Plus, X, ChevronLeft, ChevronRight, Save, Copy } from 'lucide-react'
 import { useTabStore, type CanvasTab } from '@/stores/tabStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useCollectionStore } from '@/stores/collectionStore'
@@ -30,6 +30,7 @@ export function CanvasTabs() {
   const tabs = useTabStore((s) => s.tabs)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const addTab = useTabStore((s) => s.addTab)
+  const duplicateTab = useTabStore((s) => s.duplicateTab)
   const switchTab = useTabStore((s) => s.switchTab)
   const closeTab = useTabStore((s) => s.closeTab)
   const renameTab = useTabStore((s) => s.renameTab)
@@ -244,6 +245,10 @@ export function CanvasTabs() {
                   <ContextMenuItem onClick={() => beginRename(tab)}>
                     Rename
                   </ContextMenuItem>
+                  <ContextMenuItem onClick={() => duplicateTab(tab.id)}>
+                    <Copy className="size-4" />
+                    <span>Duplicate</span>
+                  </ContextMenuItem>
                   <ContextMenuItem onClick={() => void saveTab(tab, 'save')}>
                     <Save className="size-4" />
                     <span>Save</span>
@@ -285,3 +290,4 @@ export function CanvasTabs() {
     </>
   )
 }
+

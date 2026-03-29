@@ -23,6 +23,7 @@ interface TabStore {
   activeTabId: string | null
 
   addTab: () => void
+  duplicateTab: (tabId: string) => void
   openTab: (name: string, collectionId: string, nodes: Node<AnyNodeData>[], edges: Edge[]) => void
   switchTab: (tabId: string) => void
   closeTab: (tabId: string) => void
@@ -86,6 +87,22 @@ function createFallbackSession(): PersistedTabSession {
   return {
     tabs: [tab],
     activeTabId: tab.id,
+  }
+}
+
+function cloneGraph(nodes: Node<AnyNodeData>[], edges: Edge[]) {
+  return normalizeCanvasGraph(structuredClone(nodes), structuredClone(edges))
+}
+
+function createDuplicateTabName(name: string, tabs: CanvasTab[]): string {
+  const baseName = name.trim() || 'Untitled'
+  const existingNames = new Set(tabs.map((tab) => tab.name))
+
+  for (let index = 1; ; index += 1) {
+    const candidate = `${baseName}-${index}`
+    if (!existingNames.has(candidate)) {
+      return candidate
+    }
   }
 }
 
@@ -198,6 +215,36 @@ export const useTabStore = create<TabStore>((set, get) => ({
     persistActiveConnectionTabs(get())
   },
 
+  duplicateTab: (tabId) => {
+    const { tabs, activeTabId, _saveActiveTab } = get()
+    const source = tabs.find((tab) => tab.id === tabId)
+    if (!source) return
+
+    if (tabId === activeTabId) {
+      _saveActiveTab()
+    }
+
+    const latestTabs = get().tabs
+    const latestSource = latestTabs.find((tab) => tab.id === tabId)
+    if (!latestSource) return
+
+    const canvas = cloneGraph(latestSource.nodes, latestSource.edges)
+    const duplicatedTab: CanvasTab = {
+      id: crypto.randomUUID(),
+      name: createDuplicateTabName(latestSource.name, latestTabs),
+      nodes: canvas.nodes,
+      edges: canvas.edges,
+      dirty: true,
+    }
+
+    _switching = true
+    set((s) => ({ tabs: [...s.tabs, duplicatedTab], activeTabId: duplicatedTab.id }))
+    useCanvasStore.getState().setNodes(duplicatedTab.nodes)
+    useCanvasStore.getState().setEdges(duplicatedTab.edges)
+    _switching = false
+    persistActiveConnectionTabs(get())
+  },
+
   openTab: (name, collectionId, nodes, edges) => {
     const { tabs, _saveActiveTab } = get()
     const existing = tabs.find((t) => t.collectionId === collectionId)
@@ -300,3 +347,4 @@ useCanvasStore.subscribe((state, prev) => {
 
   persistActiveConnectionTabs(useTabStore.getState())
 })
+
