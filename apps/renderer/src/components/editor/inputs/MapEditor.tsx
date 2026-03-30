@@ -27,55 +27,58 @@ export function MapEditor({ value, onChange, keyType, valueType }: MapEditorProp
 
   const updateKey = (oldKey: string, newKey: string) => {
     if (newKey === oldKey) return
+
     const updated: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) {
-      updated[k === oldKey ? newKey : k] = v
+    for (const [currentKey, currentValue] of Object.entries(value)) {
+      updated[currentKey === oldKey ? newKey : currentKey] = currentValue
     }
     onChange(updated)
   }
 
-  const updateValue = (key: string, v: unknown) => {
-    onChange({ ...value, [key]: v })
+  const updateValue = (key: string, nextValue: unknown) => {
+    onChange({ ...value, [key]: nextValue })
   }
 
   return (
-    <div className="rounded border p-1.5 space-y-1 border-border">
-      {entries.map(([key, val]) => (
-        <div key={key} className="flex items-center gap-1">
-          <Input
-            value={key}
-            onChange={(e) => updateKey(key, e.target.value)}
-            className="h-6 text-[10px] w-20"
-            placeholder={keyType}
-          />
-          <span className="text-[10px] text-muted-foreground">:</span>
-          {valueType === 'string' ? (
+    <div className="space-y-1 rounded border border-border p-1.5">
+      {entries.map(([key, currentValue], index) => (
+        <div key={`${index}-${keyType}-${valueType}`} className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
             <Input
-              value={(val as string) ?? ''}
-              onChange={(e) => updateValue(key, e.target.value)}
-              className="h-6 text-[10px] flex-1"
+              value={key}
+              onChange={(e) => updateKey(key, e.target.value)}
+              className="h-6 w-full text-[10px]"
+              placeholder={keyType}
             />
-          ) : (
-            <div className="flex-1">
-              <NumberInput
-                value={val as number}
-                onChange={(v) => updateValue(key, v)}
+          </div>
+          <span className="text-[10px] text-muted-foreground">:</span>
+          <div className="min-w-0 flex-1">
+            {valueType === 'string' ? (
+              <Input
+                value={(currentValue as string) ?? ''}
+                onChange={(e) => updateValue(key, e.target.value)}
+                className="h-6 w-full text-[10px]"
               />
-            </div>
-          )}
+            ) : (
+              <NumberInput
+                value={currentValue as number}
+                onChange={(nextValue) => updateValue(key, nextValue)}
+              />
+            )}
+          </div>
           <Button
             variant="ghost"
             size="sm"
             className="h-5 w-5 p-0"
             onClick={() => removeEntry(key)}
           >
-            <Trash2 className="w-3 h-3" style={{ color: 'var(--status-error)' }} />
+            <Trash2 className="h-3 w-3" style={{ color: 'var(--status-error)' }} />
           </Button>
         </div>
       ))}
 
       <Button variant="ghost" size="sm" className="h-6 w-full text-[10px]" onClick={addEntry}>
-        <Plus className="w-3 h-3 mr-1" /> 添加
+        <Plus className="mr-1 h-3 w-3" /> 添加
       </Button>
     </div>
   )
