@@ -201,7 +201,7 @@ function FieldInput({ field, value, onChange, getMessage, showRequiredMarker }: 
           showRequiredMarker={showRequiredMarker}
         />
         <EnumSelector
-          value={(value as number) ?? 0}
+          value={value}
           onChange={onChange}
           enumType={field.type}
         />

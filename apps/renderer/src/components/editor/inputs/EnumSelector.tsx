@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import {
   Select,
   SelectContent,
@@ -8,7 +9,7 @@ import {
 import { useProtoStore } from '@/stores/protoStore'
 
 interface EnumSelectorProps {
-  value: number
+  value: unknown
   onChange: (value: unknown) => void
   enumType: string
 }
@@ -16,38 +17,60 @@ interface EnumSelectorProps {
 export function EnumSelector({ value, onChange, enumType }: EnumSelectorProps) {
   const files = useProtoStore((s) => s.files)
 
-  // 查找 enum 定义
   let enumValues: { name: string; number: number }[] = []
   for (const file of files) {
-    // 检查顶层 enum
-    const found = file.Enums?.find((e) => e.name === enumType)
-    if (found) {
-      enumValues = found.values
+    const topLevel = file.Enums?.find((e) => (e as { name?: string; Name?: string }).name === enumType || (e as { name?: string; Name?: string }).Name === enumType)
+    if (topLevel) {
+      enumValues = (topLevel as { values?: { name: string; number: number }[]; Values?: { Name: string; Number: number }[] }).values
+        ?? (topLevel as { values?: { name: string; number: number }[]; Values?: { Name: string; Number: number }[] }).Values?.map((item) => ({
+          name: item.Name,
+          number: item.Number,
+        }))
+        ?? []
       break
     }
-    // 检查嵌套 enum（简化：只检查顶层 message 内的 enum）
+
     for (const msg of file.Messages || []) {
-      const nested = msg.NestedEnums?.find((e) => e.name === enumType)
+      const nested = msg.NestedEnums?.find((e) => (e as { name?: string; Name?: string }).name === enumType || (e as { name?: string; Name?: string }).Name === enumType)
       if (nested) {
-        enumValues = nested.values
+        enumValues = (nested as { values?: { name: string; number: number }[]; Values?: { Name: string; Number: number }[] }).values
+          ?? (nested as { values?: { name: string; number: number }[]; Values?: { Name: string; Number: number }[] }).Values?.map((item) => ({
+            name: item.Name,
+            number: item.Number,
+          }))
+          ?? []
         break
       }
     }
+
     if (enumValues.length > 0) break
   }
 
+  const defaultValue = enumValues[0]?.number ?? 0
+  const normalizedValue = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value !== ''
+      ? Number(value)
+      : defaultValue
+
+  useEffect(() => {
+    if (value === undefined && enumValues.length > 0) {
+      onChange(defaultValue)
+    }
+  }, [defaultValue, enumValues.length, onChange, value])
+
   return (
     <Select
-      value={String(value)}
-      onValueChange={(v) => onChange(parseInt(v))}
+      value={String(normalizedValue)}
+      onValueChange={(nextValue) => onChange(parseInt(nextValue, 10))}
     >
       <SelectTrigger className="h-7 text-xs">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {enumValues.map((ev) => (
-          <SelectItem key={ev.number} value={String(ev.number)} className="text-xs">
-            {ev.name} ({ev.number})
+        {enumValues.map((item) => (
+          <SelectItem key={item.number} value={String(item.number)} className="text-xs">
+            {item.name} ({item.number})
           </SelectItem>
         ))}
       </SelectContent>
