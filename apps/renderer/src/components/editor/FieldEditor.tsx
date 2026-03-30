@@ -25,9 +25,9 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const getConnection = useSavedConnectionStore((s) => s.getConnection)
 
-  const isPomelo = activeConnectionId
-    ? getConnection(activeConnectionId)?.frameConfig?.parserMode === 'pomelo'
-    : false
+  const activeConnection = activeConnectionId ? getConnection(activeConnectionId) : undefined
+  const isPomelo = activeConnection?.frameConfig?.parserMode === 'pomelo'
+  const isThriftCodec = activeConnection?.codec === 'thrift'
 
   if (!node || !('messageName' in node.data)) return null
 
@@ -36,7 +36,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   if (!message) {
     return (
       <div className="text-xs text-muted-foreground">
-        未找到 Message 定义: {data.messageName}
+        Message definition not found: {data.messageName}
       </div>
     )
   }
@@ -58,16 +58,16 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
   }
 
   const routeFromBrowser = routeMappings.some(
-    (m) => m.requestMsg === data.messageName && (m.route !== 0 || !!m.stringRoute)
+    (m) => m.requestMsg === data.messageName && (m.route !== 0 || !!m.stringRoute),
   )
 
   return (
     <div className="grid gap-3">
       {isPomelo ? (
         <div className="grid gap-2">
-          <Label htmlFor={`route-${nodeId}`}>路由</Label>
+          <Label htmlFor={`route-${nodeId}`}>Route</Label>
           {routeFromBrowser && (
-            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+            <span className="text-xs text-muted-foreground">(Configured by protocol browser)</span>
           )}
           <Input
             id={`route-${nodeId}`}
@@ -79,14 +79,14 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
         </div>
       ) : routeFields.length > 0 ? (
         <div className="grid gap-2">
-          <Label>路由</Label>
+          <Label>Route</Label>
           {routeFromBrowser && (
-            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+            <span className="text-xs text-muted-foreground">(Configured by protocol browser)</span>
           )}
           <div className="flex items-center gap-2">
             {routeFields.map((rf) => (
-              <div key={rf.name} className="flex-1 grid gap-1">
-                <span className="text-xs text-muted-foreground uppercase">{rf.name}</span>
+              <div key={rf.name} className="grid flex-1 gap-1">
+                <span className="text-xs uppercase text-muted-foreground">{rf.name}</span>
                 <Input
                   value={routeValues?.[rf.name] ?? 0}
                   onChange={(e) => handleRouteFieldChange(rf.name, Number(e.target.value) || 0)}
@@ -98,9 +98,9 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
         </div>
       ) : (
         <div className="grid gap-2">
-          <Label htmlFor={`route-${nodeId}`}>路由</Label>
+          <Label htmlFor={`route-${nodeId}`}>Route</Label>
           {routeFromBrowser && (
-            <span className="text-xs text-muted-foreground">(由协议浏览器设置)</span>
+            <span className="text-xs text-muted-foreground">(Configured by protocol browser)</span>
           )}
           <Input
             id={`route-${nodeId}`}
@@ -120,6 +120,7 @@ export function FieldEditor({ nodeId }: FieldEditorProps) {
           value={data.fields[field.name]}
           onChange={(v) => setFieldValue(field.name, v)}
           getMessage={getMessageByName}
+          showRequiredMarker={isThriftCodec && !field.isOptional}
         />
       ))}
     </div>
@@ -131,19 +132,20 @@ interface FieldInputProps {
   value: unknown
   onChange: (value: unknown) => void
   getMessage: (name: string) => MessageInfo | undefined
+  showRequiredMarker: boolean
 }
 
-function FieldInput({ field, value, onChange, getMessage }: FieldInputProps) {
-  // Oneof 字段由 OneofEditor 处理
+function FieldInput({ field, value, onChange, getMessage, showRequiredMarker }: FieldInputProps) {
   if (field.oneofName) return null
 
-  // Map 类型
   if (field.isMap) {
     return (
       <div className="grid gap-2">
-        <Label>
-          {field.name} <span className="text-xs text-muted-foreground">map&lt;{field.mapKey}, {field.mapValue}&gt;</span>
-        </Label>
+        <FieldLabel
+          fieldName={field.name}
+          typeLabel={`map<${field.mapKey}, ${field.mapValue}>`}
+          showRequiredMarker={showRequiredMarker}
+        />
         <MapEditor
           value={(value as Record<string, unknown>) || {}}
           onChange={onChange}
@@ -154,13 +156,14 @@ function FieldInput({ field, value, onChange, getMessage }: FieldInputProps) {
     )
   }
 
-  // Repeated 类型
   if (field.isRepeated) {
     return (
       <div className="grid gap-2">
-        <Label>
-          {field.name} <span className="text-xs text-muted-foreground">repeated {field.type}</span>
-        </Label>
+        <FieldLabel
+          fieldName={field.name}
+          typeLabel={`repeated ${field.type}`}
+          showRequiredMarker={showRequiredMarker}
+        />
         <RepeatedEditor
           value={(value as unknown[]) || []}
           onChange={onChange}
@@ -171,14 +174,15 @@ function FieldInput({ field, value, onChange, getMessage }: FieldInputProps) {
     )
   }
 
-  // 嵌套 message
   if (field.kind === 'message') {
     const msgDef = getMessage(field.type)
     return (
       <div className="grid gap-2">
-        <Label>
-          {field.name} <span className="text-xs text-muted-foreground">{field.type.split('.').pop()}</span>
-        </Label>
+        <FieldLabel
+          fieldName={field.name}
+          typeLabel={field.type.split('.').pop()}
+          showRequiredMarker={showRequiredMarker}
+        />
         <NestedEditor
           value={(value as Record<string, unknown>) || {}}
           onChange={onChange}
@@ -189,13 +193,13 @@ function FieldInput({ field, value, onChange, getMessage }: FieldInputProps) {
     )
   }
 
-  // Enum
   if (field.kind === 'enum') {
     return (
       <div className="grid gap-2">
-        <Label>
-          {field.name}
-        </Label>
+        <FieldLabel
+          fieldName={field.name}
+          showRequiredMarker={showRequiredMarker}
+        />
         <EnumSelector
           value={(value as number) ?? 0}
           onChange={onChange}
@@ -205,14 +209,33 @@ function FieldInput({ field, value, onChange, getMessage }: FieldInputProps) {
     )
   }
 
-  // 标量类型
   return (
     <div className="grid gap-2">
-      <Label>
-        {field.name} <span className="text-xs text-muted-foreground">{field.type}</span>
-      </Label>
+      <FieldLabel
+        fieldName={field.name}
+        typeLabel={field.type}
+        showRequiredMarker={showRequiredMarker}
+      />
       <ScalarInput type={field.type} value={value} onChange={onChange} />
     </div>
+  )
+}
+
+function FieldLabel({
+  fieldName,
+  typeLabel,
+  showRequiredMarker,
+}: {
+  fieldName: string
+  typeLabel?: string
+  showRequiredMarker: boolean
+}) {
+  return (
+    <Label>
+      {fieldName}
+      {showRequiredMarker && <span className="ml-1 text-destructive">*</span>}
+      {typeLabel && <span className="text-xs text-muted-foreground"> {typeLabel}</span>}
+    </Label>
   )
 }
 
@@ -246,7 +269,7 @@ function ScalarInput({
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
           className="font-mono"
-          placeholder="十六进制"
+          placeholder="hex bytes"
         />
       )
     case 'float':
@@ -258,7 +281,6 @@ function ScalarInput({
         />
       )
     default:
-      // int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64
       return (
         <Input
           value={(value as number) ?? ''}
