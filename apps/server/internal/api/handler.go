@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +19,6 @@ import (
 )
 
 type ConnState struct {
-	ProtoDir       string
 	CollectionFile string
 	RouteFile      string
 	ParseResult    *parser.ParseResult
@@ -26,9 +27,12 @@ type ConnState struct {
 }
 type AppState struct {
 	DataDir                 string
+	SchemaDir               string
 	TemplateFile            string
 	CollectionFile          string
 	CollectionMigrationFile string
+	ParseResult             *parser.ParseResult
+	ThriftResult            *thriftparser.ParseResult
 	mu                      sync.RWMutex
 	connections             map[string]*ConnState
 	collectionsMigrated     bool
@@ -55,25 +59,19 @@ func (s *AppState) GetConnState(connID string) *ConnState {
 	}
 
 	connDir := filepath.Join(s.DataDir, "connections", connID)
-	protoDir := filepath.Join(connDir, "proto")
-	os.MkdirAll(protoDir, 0755)
-
+	_ = os.MkdirAll(connDir, 0755)
 	routeFile := filepath.Join(connDir, "routes.json")
 	cs = &ConnState{
-		ProtoDir:       protoDir,
 		CollectionFile: filepath.Join(connDir, "collections.json"),
 		RouteFile:      routeFile,
 		RouteMappings:  make(map[string]RouteMapping),
+		ParseResult:    s.ParseResult,
+		ThriftResult:   s.ThriftResult,
 	}
 	if routes, err := readRouteMappings(routeFile); err == nil {
 		for _, rm := range routes {
 			cs.RouteMappings[rm.Key()] = rm
 		}
-	}
-
-	if protoResult, thriftResult, err := loadSchemaDir(protoDir); err == nil {
-		cs.ParseResult = protoResult
-		cs.ThriftResult = thriftResult
 	}
 
 	s.connections[connID] = cs
@@ -146,13 +144,192 @@ func (rm RouteMapping) Key() string {
 	return fmt.Sprintf("%d", rm.Route)
 }
 func NewAppState(dataDir string) *AppState {
-	return &AppState{
+	state := &AppState{
 		DataDir:                 dataDir,
+		SchemaDir:               filepath.Join(dataDir, "schema"),
 		TemplateFile:            filepath.Join(dataDir, "templates.json"),
 		CollectionFile:          filepath.Join(dataDir, "collections.json"),
 		CollectionMigrationFile: filepath.Join(dataDir, "collections.migrated"),
 		connections:             make(map[string]*ConnState),
 	}
+	state.loadSharedSchema()
+	return state
+}
+
+type schemaFileData struct {
+	RelativePath string
+	Content      []byte
+}
+
+func (s *AppState) loadSharedSchema() {
+	if err := os.MkdirAll(s.SchemaDir, 0755); err != nil {
+		return
+	}
+
+	hasSchemaFiles, err := schemaDirHasEntries(s.SchemaDir)
+	if err != nil {
+		return
+	}
+	if hasSchemaFiles {
+		if protoResult, thriftResult, err := loadSchemaDir(s.SchemaDir); err == nil {
+			s.ParseResult = protoResult
+			s.ThriftResult = thriftResult
+		}
+		return
+	}
+
+	if protoResult, thriftResult, err := migrateLegacySchema(filepath.Join(s.DataDir, "connections"), s.SchemaDir); err == nil {
+		s.ParseResult = protoResult
+		s.ThriftResult = thriftResult
+	}
+}
+
+func (s *AppState) getSharedSchemaResults() (*parser.ParseResult, *thriftparser.ParseResult) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ParseResult, s.ThriftResult
+}
+
+func (s *AppState) setSharedSchemaResults(protoResult *parser.ParseResult, thriftResult *thriftparser.ParseResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.ParseResult = protoResult
+	s.ThriftResult = thriftResult
+	for _, cs := range s.connections {
+		cs.ParseResult = protoResult
+		cs.ThriftResult = thriftResult
+	}
+}
+
+func schemaDirHasEntries(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
+func migrateLegacySchema(connectionRoot string, schemaDir string) (*parser.ParseResult, *thriftparser.ParseResult, error) {
+	files, err := collectLegacySchemaFiles(connectionRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(files) == 0 {
+		return nil, nil, nil
+	}
+	if err := rewriteSchemaDir(schemaDir, files); err != nil {
+		return nil, nil, err
+	}
+	return loadSchemaDir(schemaDir)
+}
+
+func collectLegacySchemaFiles(connectionRoot string) ([]schemaFileData, error) {
+	entries, err := os.ReadDir(connectionRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	fileMap := make(map[string]schemaFileData)
+	schemaExt := ""
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		legacySchemaDir := filepath.Join(connectionRoot, entry.Name(), "proto")
+		if _, err := os.Stat(legacySchemaDir); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+
+		err = filepath.Walk(legacySchemaDir, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() {
+				return nil
+			}
+
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".proto" && ext != ".thrift" {
+				return nil
+			}
+			if schemaExt == "" {
+				schemaExt = ext
+			} else if schemaExt != ext {
+				return fmt.Errorf("mixed proto and thrift schema files are not supported")
+			}
+
+			relPath, err := filepath.Rel(legacySchemaDir, path)
+			if err != nil {
+				return err
+			}
+			relPath = filepath.ToSlash(relPath)
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			if existing, ok := fileMap[relPath]; ok {
+				if !bytes.Equal(existing.Content, data) {
+					return fmt.Errorf("conflicting legacy schema file: %s", relPath)
+				}
+				return nil
+			}
+
+			fileMap[relPath] = schemaFileData{
+				RelativePath: relPath,
+				Content:      data,
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(fileMap) == 0 {
+		return nil, nil
+	}
+
+	files := make([]schemaFileData, 0, len(fileMap))
+	for _, file := range fileMap {
+		files = append(files, file)
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].RelativePath < files[j].RelativePath
+	})
+	return files, nil
+}
+
+func rewriteSchemaDir(dir string, files []schemaFileData) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		targetPath := filepath.Join(dir, filepath.FromSlash(file.RelativePath))
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(targetPath, file.Content, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func RegisterHandlers(srv *Server, state *AppState) {
 	srv.HandleHTTP("POST /api/proto/upload", makeProtoUploadHandler(state, srv))
@@ -181,12 +358,7 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		connID := r.URL.Query().Get("connectionId")
-		if connID == "" {
-			writeJSONError(w, http.StatusBadRequest, "connectionId is required")
-			return
-		}
-		cs := state.GetConnState(connID)
-		if cs == nil {
+		if connID != "" && state.GetConnState(connID) == nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid connectionId")
 			return
 		}
@@ -204,8 +376,8 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 
 		paths := r.MultipartForm.Value["paths"]
 
-		os.RemoveAll(cs.ProtoDir)
-		os.MkdirAll(cs.ProtoDir, 0755)
+		os.RemoveAll(state.SchemaDir)
+		os.MkdirAll(state.SchemaDir, 0755)
 
 		var schemaExt string
 		for i, fh := range files {
@@ -238,7 +410,7 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 				return
 			}
 
-			dstPath := filepath.Join(cs.ProtoDir, cleanName)
+			dstPath := filepath.Join(state.SchemaDir, cleanName)
 			if dir := filepath.Dir(dstPath); dir != "." {
 				os.MkdirAll(dir, 0755)
 			}
@@ -255,7 +427,7 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			dst.Close()
 		}
 
-		protoResult, thriftResult, err := loadSchemaDir(cs.ProtoDir)
+		protoResult, thriftResult, err := loadSchemaDir(state.SchemaDir)
 		if err != nil {
 			errMsg := err.Error()
 			missing := extractMissingImports(errMsg)
@@ -271,8 +443,7 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			return
 		}
 
-		cs.ParseResult = protoResult
-		cs.ThriftResult = thriftResult
+		state.setSharedSchemaResults(protoResult, thriftResult)
 
 		var filesResp any = []any{}
 		var messagesResp any = []any{}
@@ -293,33 +464,17 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 }
 func makeProtoListHandler(state *AppState) HandlerFunc {
 	return func(payload json.RawMessage) (any, error) {
-		var req struct {
-			ConnectionID string `json:"connectionId"`
-		}
-		if err := json.Unmarshal(payload, &req); err != nil || req.ConnectionID == "" {
+		protoResult, thriftResult := state.getSharedSchemaResults()
+		if protoResult != nil {
 			return map[string]any{
-				"files":    []any{},
-				"messages": []any{},
+				"files":    protoResult.Files,
+				"messages": protoResult.AllMessages(),
 			}, nil
 		}
-
-		cs := state.GetConnState(req.ConnectionID)
-		if cs == nil {
+		if thriftResult != nil {
 			return map[string]any{
-				"files":    []any{},
-				"messages": []any{},
-			}, nil
-		}
-		if cs.ParseResult != nil {
-			return map[string]any{
-				"files":    cs.ParseResult.Files,
-				"messages": cs.ParseResult.AllMessages(),
-			}, nil
-		}
-		if cs.ThriftResult != nil {
-			return map[string]any{
-				"files":    cs.ThriftResult.Files,
-				"messages": cs.ThriftResult.AllMessages(),
+				"files":    thriftResult.Files,
+				"messages": thriftResult.AllMessages(),
 			}, nil
 		}
 		return map[string]any{

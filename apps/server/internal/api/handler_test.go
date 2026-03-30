@@ -92,6 +92,90 @@ message Pong { int64 timestamp = 1; string message = 2; }
 	}
 }
 
+func TestProtoListSharedAcrossConnections(t *testing.T) {
+	_, _, port := setupTestServer(t)
+
+	protoContent := `syntax = "proto3";
+package test;
+message Ping { int64 timestamp = 1; }
+message Pong { int64 timestamp = 1; string message = 2; }
+`
+	body, contentType := createMultipartBody(t, map[string]string{
+		"test.proto": protoContent,
+	})
+
+	resp, err := http.Post(
+		fmt.Sprintf("http://127.0.0.1:%d/api/proto/upload?connectionId=conn_1_abc", port),
+		contentType,
+		body,
+	)
+	if err != nil {
+		t.Fatalf("POST error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, respBody)
+	}
+
+	ws, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/ws", port), nil)
+	if err != nil {
+		t.Fatalf("Dial error: %v", err)
+	}
+	defer ws.Close()
+
+	listResp := wsRequest(t, ws, "1", "proto.list", map[string]string{"connectionId": "conn_2_def"})
+	if listResp.Event != "proto.list" {
+		t.Fatalf("event = %q, want %q", listResp.Event, "proto.list")
+	}
+
+	payload, _ := json.Marshal(listResp.Payload)
+	var result struct {
+		Messages []any `json:"messages"`
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal proto list payload: %v", err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("message count = %d, want 2", len(result.Messages))
+	}
+}
+
+func TestLegacyProtoSchemaMigratesToGlobal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proto-global-migrate-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	legacyProtoDir := filepath.Join(tmpDir, "connections", "conn_1_abc", "proto")
+	if err := os.MkdirAll(legacyProtoDir, 0755); err != nil {
+		t.Fatalf("create legacy proto dir: %v", err)
+	}
+	protoContent := `syntax = "proto3";
+package test;
+message Ping { int64 timestamp = 1; }
+`
+	if err := os.WriteFile(filepath.Join(legacyProtoDir, "test.proto"), []byte(protoContent), 0644); err != nil {
+		t.Fatalf("write legacy proto file: %v", err)
+	}
+
+	state := NewAppState(tmpDir)
+	protoResult, thriftResult := state.getSharedSchemaResults()
+	if thriftResult != nil {
+		t.Fatalf("unexpected thrift schema after migration")
+	}
+	if protoResult == nil {
+		t.Fatalf("expected proto schema to be migrated")
+	}
+	if len(protoResult.AllMessages()) != 1 {
+		t.Fatalf("message count = %d, want 1", len(protoResult.AllMessages()))
+	}
+	if _, err := os.Stat(filepath.Join(state.SchemaDir, "test.proto")); err != nil {
+		t.Fatalf("global schema file missing: %v", err)
+	}
+}
 func TestProtoUploadInvalidFile(t *testing.T) {
 	_, _, port := setupTestServer(t)
 
@@ -226,7 +310,7 @@ func TestRouteSetInvalid(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// route 婵?0 闁圭厧鐡ㄥ瑙勬叏閵堝鐓?
+	// route 濠?0 闂佸湱鍘ч悺銊ヮ潖鐟欏嫭鍙忛柕鍫濐槹閻?
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": "conn_1_abc",
 		"route":        0,
