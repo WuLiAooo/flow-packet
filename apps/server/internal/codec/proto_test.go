@@ -311,3 +311,94 @@ message TestMsg {
 		t.Fatalf("data = %v, want %q", result["data"], "deadbeef")
 	}
 }
+
+func TestDynamicDecodeInt64AndUint64AsStrings(t *testing.T) {
+	proto := `syntax = "proto3";
+message TestMsg {
+  int64 score = 1;
+  uint64 uid = 2;
+  repeated int64 ids = 3;
+  map<string, uint64> attrs = 4;
+}`
+	md := compileProto(t, proto, "TestMsg")
+
+	fields := map[string]any{
+		"score": int64(9223372036854775807),
+		"uid":   uint64(18446744073709551615),
+		"ids": []any{
+			int64(1),
+			int64(9223372036854775807),
+		},
+		"attrs": map[string]any{
+			"player": uint64(18446744073709551615),
+		},
+	}
+
+	data, err := DynamicEncode(md, fields)
+	if err != nil {
+		t.Fatalf("DynamicEncode error: %v", err)
+	}
+
+	result, err := DynamicDecode(data, md)
+	if err != nil {
+		t.Fatalf("DynamicDecode error: %v", err)
+	}
+
+	if result["score"] != "9223372036854775807" {
+		t.Fatalf("score = %v (%T), want string 9223372036854775807", result["score"], result["score"])
+	}
+	if result["uid"] != "18446744073709551615" {
+		t.Fatalf("uid = %v (%T), want string 18446744073709551615", result["uid"], result["uid"])
+	}
+
+	ids, ok := result["ids"].([]any)
+	if !ok {
+		t.Fatalf("ids type = %T, want []any", result["ids"])
+	}
+	if len(ids) != 2 || ids[0] != "1" || ids[1] != "9223372036854775807" {
+		t.Fatalf("ids = %#v, want [\"1\", \"9223372036854775807\"]", ids)
+	}
+
+	attrs, ok := result["attrs"].(map[string]any)
+	if !ok {
+		t.Fatalf("attrs type = %T, want map[string]any", result["attrs"])
+	}
+	if attrs["player"] != "18446744073709551615" {
+		t.Fatalf("attrs[player] = %v (%T), want string 18446744073709551615", attrs["player"], attrs["player"])
+	}
+}
+
+func TestDynamicEncodeAcceptsStringInt64AndUint64Inputs(t *testing.T) {
+	proto := `syntax = "proto3";
+message TestMsg {
+  int64 score = 1;
+  uint64 uid = 2;
+  repeated int64 ids = 3;
+  map<string, uint64> attrs = 4;
+}`
+	md := compileProto(t, proto, "TestMsg")
+
+	data, err := DynamicEncode(md, map[string]any{
+		"score": "9223372036854775807",
+		"uid":   "18446744073709551615",
+		"ids":   []any{"1", "9223372036854775807"},
+		"attrs": map[string]any{
+			"player": "18446744073709551615",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DynamicEncode error: %v", err)
+	}
+
+	result, err := DynamicDecode(data, md)
+	if err != nil {
+		t.Fatalf("DynamicDecode error: %v", err)
+	}
+
+	if result["score"] != "9223372036854775807" {
+		t.Fatalf("score = %v (%T), want string 9223372036854775807", result["score"], result["score"])
+	}
+	if result["uid"] != "18446744073709551615" {
+		t.Fatalf("uid = %v (%T), want string 18446744073709551615", result["uid"], result["uid"])
+	}
+}

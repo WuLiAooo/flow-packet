@@ -4,13 +4,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"strconv"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// DynamicEncode 使用动态消息将字段值编码为 Protobuf 字节数组
+// DynamicEncode encodes field values into protobuf bytes using a dynamic descriptor.
 func DynamicEncode(md protoreflect.MessageDescriptor, fields map[string]any) ([]byte, error) {
 	msg := dynamicpb.NewMessage(md)
 
@@ -21,8 +22,8 @@ func DynamicEncode(md protoreflect.MessageDescriptor, fields map[string]any) ([]
 	return proto.Marshal(msg)
 }
 
-// DynamicDecode 将 Protobuf 字节数组解码为 JSON 友好的 map
-// 如果 md 为 nil, 返回十六进制字符串
+// DynamicDecode decodes protobuf bytes into a JSON-friendly map.
+// If md is nil, it returns the raw payload as a hex string.
 func DynamicDecode(data []byte, md protoreflect.MessageDescriptor) (map[string]any, error) {
 	if md == nil {
 		return map[string]any{
@@ -231,7 +232,7 @@ func toProtoScalar(fd protoreflect.FieldDescriptor, val any) (protoreflect.Value
 	}
 }
 
-// messageToMap 将动态消息转为 map[string]any
+// messageToMap converts a dynamic protobuf message into a JSON-friendly map.
 func messageToMap(msg *dynamicpb.Message) map[string]any {
 	result := make(map[string]any)
 	md := msg.Descriptor()
@@ -278,7 +279,6 @@ func listToAny(fd protoreflect.FieldDescriptor, list protoreflect.List) any {
 	}
 	return result
 }
-
 func scalarToAny(fd protoreflect.FieldDescriptor, val protoreflect.Value) any {
 	switch fd.Kind() {
 	case protoreflect.MessageKind, protoreflect.GroupKind:
@@ -293,12 +293,16 @@ func scalarToAny(fd protoreflect.FieldDescriptor, val protoreflect.Value) any {
 		return val.Bool()
 	case protoreflect.BytesKind:
 		return hex.EncodeToString(val.Bytes())
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return strconv.FormatInt(val.Int(), 10)
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return strconv.FormatUint(val.Uint(), 10)
 	default:
 		return val.Interface()
 	}
 }
 
-// 类型转换辅助函数
+// Type conversion helpers.
 
 func toBool(v any) (bool, bool) {
 	switch val := v.(type) {
@@ -325,6 +329,12 @@ func toInt64(v any) (int64, bool) {
 		return int64(val), true
 	case float32:
 		return int64(val), true
+	case string:
+		parsed, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}
@@ -343,11 +353,26 @@ func toUint64(v any) (uint64, bool) {
 	case uint64:
 		return val, true
 	case int:
+		if val < 0 {
+			return 0, false
+		}
 		return uint64(val), true
 	case int64:
+		if val < 0 {
+			return 0, false
+		}
 		return uint64(val), true
 	case float64:
+		if val < 0 {
+			return 0, false
+		}
 		return uint64(val), true
+	case string:
+		parsed, err := strconv.ParseUint(val, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}

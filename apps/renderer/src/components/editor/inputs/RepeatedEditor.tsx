@@ -1,9 +1,10 @@
-import { Plus, Trash2 } from 'lucide-react'
+﻿import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { FieldInfo, MessageInfo } from '@/stores/protoStore'
 import { NestedEditor } from './NestedEditor'
 import { NumberInput } from './NumberInput'
+import { getDefaultScalarValue, isLongScalarType, isStringBackedScalarType } from './scalarTypes'
 
 interface RepeatedEditorProps {
   value: unknown[]
@@ -14,8 +15,7 @@ interface RepeatedEditorProps {
 
 export function RepeatedEditor({ value, onChange, field, getMessage }: RepeatedEditorProps) {
   const addItem = () => {
-    const defaultValue = field.kind === 'message' ? {} : field.type === 'string' ? '' : 0
-    onChange([...value, defaultValue])
+    onChange([...value, getDefaultScalarValue(field.type, field.kind)])
   }
 
   const removeItem = (index: number) => {
@@ -29,12 +29,10 @@ export function RepeatedEditor({ value, onChange, field, getMessage }: RepeatedE
   }
 
   return (
-    <div
-      className="rounded border p-1.5 space-y-1 border-border"
-    >
+    <div className="space-y-1 rounded border border-border p-1.5">
       {value.map((item, i) => (
         <div key={i} className="flex items-start gap-1">
-          <span className="text-[10px] shrink-0 pt-1 text-muted-foreground">
+          <span className="shrink-0 pt-1 text-[10px] text-muted-foreground">
             [{i}]
           </span>
           <div className="flex-1">
@@ -45,11 +43,11 @@ export function RepeatedEditor({ value, onChange, field, getMessage }: RepeatedE
                 message={getMessage(field.type)}
                 getMessage={getMessage}
               />
-            ) : field.type === 'string' || field.type === 'bytes' ? (
+            ) : isStringBackedScalarType(field.type) ? (
               <Input
-                value={(item as string) ?? ''}
+                value={(item as string | number) ?? ''}
                 onChange={(e) => updateItem(i, e.target.value)}
-                className="h-6 text-[10px]"
+                className={`h-6 text-[10px]${isLongScalarType(field.type) ? ' font-mono' : ''}`}
               />
             ) : (
               <NumberInput
@@ -61,16 +59,16 @@ export function RepeatedEditor({ value, onChange, field, getMessage }: RepeatedE
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 w-5 p-0 shrink-0"
+            className="h-5 w-5 shrink-0 p-0"
             onClick={() => removeItem(i)}
           >
-            <Trash2 className="w-3 h-3" style={{ color: 'var(--status-error)' }} />
+            <Trash2 className="h-3 w-3" style={{ color: 'var(--status-error)' }} />
           </Button>
         </div>
       ))}
 
       <Button variant="ghost" size="sm" className="h-6 w-full text-[10px]" onClick={addItem}>
-        <Plus className="w-3 h-3 mr-1" /> 添加
+        <Plus className="mr-1 h-3 w-3" /> 添加
       </Button>
     </div>
   )

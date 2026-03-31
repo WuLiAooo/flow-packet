@@ -3,6 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumberInput } from './NumberInput'
+import { getDefaultScalarValue, isLongScalarType, isStringBackedScalarType } from './scalarTypes'
 
 interface MapEditorProps {
   value: Record<string, unknown>
@@ -66,6 +67,8 @@ function getNextPlaceholderKey(rows: MapRow[]): string {
 export function MapEditor({ value, onChange, keyType, valueType }: MapEditorProps) {
   const [rows, setRows] = useState<MapRow[]>(() => buildRowsFromValue(value))
   const skipSyncRef = useRef(false)
+  const valueUsesStringInput = isStringBackedScalarType(valueType)
+  const valueIsLong = isLongScalarType(valueType)
 
   useEffect(() => {
     if (skipSyncRef.current) {
@@ -83,8 +86,7 @@ export function MapEditor({ value, onChange, keyType, valueType }: MapEditorProp
 
   const addEntry = () => {
     const key = getNextPlaceholderKey(rows)
-    const defaultValue = valueType === 'string' ? '' : 0
-    commitRows([...rows, createMapRow(key, defaultValue)])
+    commitRows([...rows, createMapRow(key, getDefaultScalarValue(valueType))])
   }
 
   const removeEntry = (rowId: string) => {
@@ -117,11 +119,11 @@ export function MapEditor({ value, onChange, keyType, valueType }: MapEditorProp
           </div>
           <span className="text-[10px] text-muted-foreground">:</span>
           <div className="min-w-0 flex-1">
-            {valueType === 'string' ? (
+            {valueUsesStringInput ? (
               <Input
-                value={(row.value as string) ?? ''}
+                value={(row.value as string | number) ?? ''}
                 onChange={(e) => updateValue(row.id, e.target.value)}
-                className="h-6 w-full text-[10px]"
+                className={`h-6 w-full text-[10px]${valueIsLong ? ' font-mono' : ''}`}
               />
             ) : (
               <NumberInput

@@ -1,10 +1,11 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import type { MessageInfo } from '@/stores/protoStore'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { NumberInput } from './NumberInput'
+import { isLongScalarType, isStringBackedScalarType } from './scalarTypes'
 
 interface NestedEditorProps {
   value: Record<string, unknown>
@@ -29,17 +30,15 @@ export function NestedEditor({ value, onChange, message, getMessage }: NestedEdi
   }
 
   return (
-    <div
-      className="rounded border pl-2 border-border"
-    >
+    <div className="rounded border border-border pl-2">
       <div
-        className="flex items-center gap-1 py-1 cursor-pointer"
+        className="flex cursor-pointer items-center gap-1 py-1"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? (
-          <ChevronDown className="w-3 h-3 text-muted-foreground" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
         ) : (
-          <ChevronRight className="w-3 h-3 text-muted-foreground" />
+          <ChevronRight className="h-3 w-3 text-muted-foreground" />
         )}
         <span className="text-[10px] text-muted-foreground">
           {message.ShortName}
@@ -97,12 +96,12 @@ function SimpleInput({
   if (type === 'bool') {
     return <Switch checked={!!value} onCheckedChange={onChange} />
   }
-  if (type === 'string' || type === 'bytes') {
+  if (isStringBackedScalarType(type)) {
     return (
       <Input
-        value={(value as string) ?? ''}
+        value={(value as string | number) ?? ''}
         onChange={(e) => onChange(e.target.value)}
-        className="h-6 text-[10px]"
+        className={`h-6 text-[10px]${isLongScalarType(type) ? ' font-mono' : ''}`}
       />
     )
   }

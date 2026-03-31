@@ -1,4 +1,4 @@
-import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
+﻿import { useCanvasStore, type RequestNodeData } from '@/stores/canvasStore'
 import { useProtoStore, type FieldInfo, type MessageInfo } from '@/stores/protoStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSavedConnectionStore } from '@/stores/savedConnectionStore'
@@ -11,6 +11,7 @@ import { EnumSelector } from './inputs/EnumSelector'
 import { NestedEditor } from './inputs/NestedEditor'
 import { RepeatedEditor } from './inputs/RepeatedEditor'
 import { MapEditor } from './inputs/MapEditor'
+import { isFloatScalarType, isLongScalarType, isStringBackedScalarType } from './inputs/scalarTypes'
 
 interface FieldEditorProps {
   nodeId: string
@@ -248,44 +249,39 @@ function ScalarInput({
   value: unknown
   onChange: (v: unknown) => void
 }) {
-  switch (type) {
-    case 'bool':
-      return (
-        <Switch
-          checked={!!value}
-          onCheckedChange={(v) => onChange(v)}
-        />
-      )
-    case 'string':
-      return (
-        <Input
-          value={(value as string) ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )
-    case 'bytes':
-      return (
-        <Input
-          value={(value as string) ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          className="font-mono"
-          placeholder="hex bytes"
-        />
-      )
-    case 'float':
-    case 'double':
-      return (
-        <Input
-          value={(value as number) ?? ''}
-          onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-        />
-      )
-    default:
-      return (
-        <Input
-          value={(value as number) ?? ''}
-          onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-        />
-      )
+  if (type === 'bool') {
+    return (
+      <Switch
+        checked={!!value}
+        onCheckedChange={(v) => onChange(v)}
+      />
+    )
   }
+
+  if (isStringBackedScalarType(type)) {
+    return (
+      <Input
+        value={(value as string | number) ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        className={isLongScalarType(type) ? 'font-mono' : undefined}
+        placeholder={type === 'bytes' ? 'hex bytes' : undefined}
+      />
+    )
+  }
+
+  if (isFloatScalarType(type)) {
+    return (
+      <Input
+        value={(value as number) ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
+      />
+    )
+  }
+
+  return (
+    <Input
+      value={(value as number) ?? ''}
+      onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
+    />
+  )
 }
