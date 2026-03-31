@@ -33,6 +33,7 @@ type AppState struct {
 	CollectionMigrationFile string
 	ParseResult             *parser.ParseResult
 	ThriftResult            *thriftparser.ParseResult
+	schemaLoaded            bool
 	mu                      sync.RWMutex
 	connections             map[string]*ConnState
 	collectionsMigrated     bool
@@ -144,7 +145,7 @@ func (rm RouteMapping) Key() string {
 	return fmt.Sprintf("%d", rm.Route)
 }
 func NewAppState(dataDir string) *AppState {
-	state := &AppState{
+	return &AppState{
 		DataDir:                 dataDir,
 		SchemaDir:               filepath.Join(dataDir, "schema"),
 		TemplateFile:            filepath.Join(dataDir, "templates.json"),
@@ -152,8 +153,6 @@ func NewAppState(dataDir string) *AppState {
 		CollectionMigrationFile: filepath.Join(dataDir, "collections.migrated"),
 		connections:             make(map[string]*ConnState),
 	}
-	state.loadSharedSchema()
-	return state
 }
 
 type schemaFileData struct {
@@ -161,30 +160,47 @@ type schemaFileData struct {
 	Content      []byte
 }
 
-func (s *AppState) loadSharedSchema() {
+func (s *AppState) EnsureSharedSchemaLoaded() {
+	s.mu.RLock()
+	if s.schemaLoaded {
+		s.mu.RUnlock()
+		return
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.schemaLoaded {
+		return
+	}
+
 	if err := os.MkdirAll(s.SchemaDir, 0755); err != nil {
+		s.schemaLoaded = true
 		return
 	}
 
 	hasSchemaFiles, err := schemaDirHasEntries(s.SchemaDir)
-	if err != nil {
-		return
-	}
-	if hasSchemaFiles {
-		if protoResult, thriftResult, err := loadSchemaDir(s.SchemaDir); err == nil {
+	if err == nil {
+		if hasSchemaFiles {
+			if protoResult, thriftResult, loadErr := loadSchemaDir(s.SchemaDir); loadErr == nil {
+				s.ParseResult = protoResult
+				s.ThriftResult = thriftResult
+			}
+		} else if protoResult, thriftResult, migrateErr := migrateLegacySchema(filepath.Join(s.DataDir, "connections"), s.SchemaDir); migrateErr == nil {
 			s.ParseResult = protoResult
 			s.ThriftResult = thriftResult
 		}
-		return
 	}
 
-	if protoResult, thriftResult, err := migrateLegacySchema(filepath.Join(s.DataDir, "connections"), s.SchemaDir); err == nil {
-		s.ParseResult = protoResult
-		s.ThriftResult = thriftResult
+	s.schemaLoaded = true
+	for _, cs := range s.connections {
+		cs.ParseResult = s.ParseResult
+		cs.ThriftResult = s.ThriftResult
 	}
 }
 
 func (s *AppState) getSharedSchemaResults() (*parser.ParseResult, *thriftparser.ParseResult) {
+	s.EnsureSharedSchemaLoaded()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ParseResult, s.ThriftResult
@@ -196,6 +212,7 @@ func (s *AppState) setSharedSchemaResults(protoResult *parser.ParseResult, thrif
 
 	s.ParseResult = protoResult
 	s.ThriftResult = thriftResult
+	s.schemaLoaded = true
 	for _, cs := range s.connections {
 		cs.ParseResult = protoResult
 		cs.ThriftResult = thriftResult
@@ -334,6 +351,7 @@ func rewriteSchemaDir(dir string, files []schemaFileData) error {
 func RegisterHandlers(srv *Server, state *AppState) {
 	srv.HandleHTTP("POST /api/proto/upload", makeProtoUploadHandler(state, srv))
 	srv.Handle("proto.list", makeProtoListHandler(state))
+	srv.Handle("schema.warmup", makeSchemaWarmupHandler(state))
 	srv.Handle("route.list", makeRouteListHandler(state))
 	srv.Handle("route.set", makeRouteSetHandler(state))
 	srv.Handle("route.delete", makeRouteDeleteHandler(state))
@@ -460,6 +478,15 @@ func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 			"files":    filesResp,
 			"messages": messagesResp,
 		})
+	}
+}
+func makeSchemaWarmupHandler(state *AppState) HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		state.EnsureSharedSchemaLoaded()
+		protoResult, thriftResult := state.getSharedSchemaResults()
+		return map[string]any{
+			"loaded": protoResult != nil || thriftResult != nil,
+		}, nil
 	}
 }
 func makeProtoListHandler(state *AppState) HandlerFunc {

@@ -162,6 +162,13 @@ message Ping { int64 timestamp = 1; }
 	}
 
 	state := NewAppState(tmpDir)
+	if state.schemaLoaded {
+		t.Fatalf("shared schema should not load during startup")
+	}
+	if _, err := os.Stat(filepath.Join(state.SchemaDir, "test.proto")); !os.IsNotExist(err) {
+		t.Fatalf("global schema should not exist before first access: %v", err)
+	}
+
 	protoResult, thriftResult := state.getSharedSchemaResults()
 	if thriftResult != nil {
 		t.Fatalf("unexpected thrift schema after migration")
@@ -310,7 +317,7 @@ func TestRouteSetInvalid(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// route 濠?0 闂佸湱鍘ч悺銊ヮ潖鐟欏嫭鍙忛柕鍫濐槹閻?
+	// route 婵?0 闂備礁婀遍崢褔鎮洪妸銉綎閻熸瑥瀚崣蹇涙煏閸繍妲归柣?
 	resp := wsRequest(t, ws, "1", "route.set", map[string]any{
 		"connectionId": "conn_1_abc",
 		"route":        0,

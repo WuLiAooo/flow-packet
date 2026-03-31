@@ -1,20 +1,12 @@
-﻿import { useEffect, useState, useCallback } from 'react'
+﻿import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Toaster } from '@/components/ui/sonner'
 import { AppSidebar, SIDEBAR_TABS, type SidebarTab } from '@/components/layout/AppSidebar'
-import { MainLayout } from '@/components/layout/MainLayout'
-import { CanvasTabs } from '@/components/layout/CanvasTabs'
-import { Toolbar } from '@/components/layout/Toolbar'
 import { TitleBar } from '@/components/layout/TitleBar'
-import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
-import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
-import { FlowCanvas } from '@/components/canvas/FlowCanvas'
-import { PropertySheet } from '@/components/editor/PropertySheet'
-import { LogPanel } from '@/components/execution/LogPanel'
 import { WelcomePage } from '@/components/connection/WelcomePage'
 import { initEventBindings } from '@/services/eventBindings'
-import { connect as wsConnect, setConnectionStatusCallback } from '@/services/ws'
+import { connect as wsConnect, sendRequest, setConnectionStatusCallback } from '@/services/ws'
 import { connectTCP, getProtoList, getRouteList } from '@/services/api'
 import { createRequestNode, createWaitResponseNode, parseDraggedProtocolMessage } from '@/lib/protocolNodes'
 import { toast } from 'sonner'
@@ -26,6 +18,37 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useCollectionStore } from '@/stores/collectionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import type { SavedConnection } from '@/stores/savedConnectionStore'
+
+const loadMainLayout = () => import('@/components/layout/MainLayout')
+const loadCanvasTabs = () => import('@/components/layout/CanvasTabs')
+const loadToolbar = () => import('@/components/layout/Toolbar')
+const loadProtoBrowser = () => import('@/components/proto/ProtoBrowser')
+const loadCollectionBrowser = () => import('@/components/collection/CollectionBrowser')
+const loadFlowCanvas = () => import('@/components/canvas/FlowCanvas')
+const loadPropertySheet = () => import('@/components/editor/PropertySheet')
+const loadLogPanel = () => import('@/components/execution/LogPanel')
+
+const MainLayout = lazy(() => loadMainLayout().then((module) => ({ default: module.MainLayout })))
+const CanvasTabs = lazy(() => loadCanvasTabs().then((module) => ({ default: module.CanvasTabs })))
+const Toolbar = lazy(() => loadToolbar().then((module) => ({ default: module.Toolbar })))
+const ProtoBrowser = lazy(() => loadProtoBrowser().then((module) => ({ default: module.ProtoBrowser })))
+const CollectionBrowser = lazy(() => loadCollectionBrowser().then((module) => ({ default: module.CollectionBrowser })))
+const FlowCanvas = lazy(() => loadFlowCanvas().then((module) => ({ default: module.FlowCanvas })))
+const PropertySheet = lazy(() => loadPropertySheet().then((module) => ({ default: module.PropertySheet })))
+const LogPanel = lazy(() => loadLogPanel().then((module) => ({ default: module.LogPanel })))
+
+function preloadWorkspaceModules() {
+  return Promise.allSettled([
+    loadMainLayout(),
+    loadCanvasTabs(),
+    loadToolbar(),
+    loadProtoBrowser(),
+    loadCollectionBrowser(),
+    loadFlowCanvas(),
+    loadPropertySheet(),
+    loadLogPanel(),
+  ])
+}
 
 function unlockBodyInteraction() {
   document.body.style.pointerEvents = ''
@@ -44,7 +67,7 @@ function cleanupTransientPortals() {
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    const timer = window.setTimeout(() => reject(new Error(message)) , timeoutMs)
     promise.then((value) => {
       window.clearTimeout(timer)
       resolve(value)
@@ -53,6 +76,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
       reject(err)
     })
   })
+}
+
+function WorkspaceFallback() {
+  return (
+    <div className="flex h-full flex-col" style={{ background: 'var(--bg-canvas)' }}>
+      <div className="h-10 shrink-0 border-b border-border px-3" style={{ background: 'var(--bg-toolbar)' }} />
+      <div className="flex min-h-0 flex-1">
+        <div className="w-12 shrink-0 border-r border-border" style={{ background: 'var(--bg-activity)' }} />
+        <div className="min-w-0 flex-1" style={{ background: 'var(--bg-canvas)' }} />
+      </div>
+    </div>
+  )
 }
 
 function App() {
@@ -91,19 +126,81 @@ function App() {
 
   useEffect(() => {
     const cleanup = initEventBindings()
+    let schemaWarmupTimer: ReturnType<typeof setTimeout> | null = null
+    let workspacePreloadTimer: ReturnType<typeof setTimeout> | null = null
+    let schemaWarmupCompleted = false
+    let schemaWarmupInFlight = false
+    let workspacePreloaded = false
+    let workspacePreloadInFlight = false
+
+    const runWorkspacePreload = () => {
+      if (workspacePreloaded || workspacePreloadInFlight) {
+        return
+      }
+      workspacePreloadInFlight = true
+      preloadWorkspaceModules()
+        .then(() => {
+          workspacePreloaded = true
+        })
+        .finally(() => {
+          workspacePreloadInFlight = false
+        })
+    }
+
+    const scheduleSchemaWarmup = () => {
+      if (schemaWarmupCompleted || schemaWarmupInFlight) {
+        return
+      }
+      if (schemaWarmupTimer) {
+        window.clearTimeout(schemaWarmupTimer)
+      }
+      schemaWarmupTimer = window.setTimeout(() => {
+        schemaWarmupTimer = null
+        schemaWarmupInFlight = true
+        sendRequest('schema.warmup')
+          .then(() => {
+            schemaWarmupCompleted = true
+          })
+          .catch(() => {})
+          .finally(() => {
+            schemaWarmupInFlight = false
+          })
+      }, 1500)
+    }
+
+    workspacePreloadTimer = window.setTimeout(() => {
+      workspacePreloadTimer = null
+      runWorkspacePreload()
+    }, 1500)
 
     const initBackend = async () => {
-      let port = 58996
+      let port: number | null = 58996
       const fp = (window as { flowPacket?: { getBackendPort: () => Promise<number> } }).flowPacket
       if (fp) {
         try {
-          port = await fp.getBackendPort()
+          const resolvedPort = await fp.getBackendPort()
+          port = typeof resolvedPort === 'number' && Number.isFinite(resolvedPort) && resolvedPort > 0
+            ? resolvedPort
+            : null
         } catch {
-          // fallback to default
+          port = null
         }
       }
 
-      setConnectionStatusCallback(() => {})
+      if (port === null) {
+        return
+      }
+
+      setConnectionStatusCallback((connected) => {
+        if (!connected) {
+          if (schemaWarmupTimer) {
+            window.clearTimeout(schemaWarmupTimer)
+            schemaWarmupTimer = null
+          }
+          return
+        }
+        scheduleSchemaWarmup()
+      })
 
       ;(window as { __BACKEND_PORT__?: number }).__BACKEND_PORT__ = port
       wsConnect(port)
@@ -111,7 +208,16 @@ function App() {
 
     initBackend()
 
-    return cleanup
+    return () => {
+      if (schemaWarmupTimer) {
+        window.clearTimeout(schemaWarmupTimer)
+      }
+      if (workspacePreloadTimer) {
+        window.clearTimeout(workspacePreloadTimer)
+      }
+      setConnectionStatusCallback(() => {})
+      cleanup()
+    }
   }, [])
 
   useEffect(() => {
@@ -136,6 +242,8 @@ function App() {
   }, [activeConnectionId])
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
+    void preloadWorkspaceModules()
+
     useConnectionStore.getState().setState('disconnected')
     useSessionStatusStore.getState().clearConnection(connection.id)
 
@@ -145,7 +253,6 @@ function App() {
       protocol: connection.protocol,
     })
     setTargetAddr(`${connection.host}:${connection.port}`)
-    setActiveConnectionId(connection.id)
 
     const routeFields = connection.frameConfig?.fields.filter((f) => f.isRoute) ?? []
     setRouteFields(routeFields)
@@ -157,6 +264,7 @@ function App() {
     execStore.setStatus('idle')
 
     useTabStore.getState().loadConnectionTabs(connection.id)
+    setActiveConnectionId(connection.id)
     useCollectionStore.getState().loadCollections(connection.id).catch(() => {})
 
     getProtoList(connection.id).then((result: unknown) => {
@@ -210,65 +318,60 @@ function App() {
     useSessionStatusStore.getState().clearAll()
   }, [activeConnectionId, setActiveConnectionId, setFiles, setMessages, setRouteMappings])
 
-  if (!activeConnectionId) {
-    return (
-      <>
-        <div className="flex h-svh w-full flex-col">
-          <TitleBar />
-          <div className="flex min-h-0 flex-1">
-            <WelcomePage onEnterConnection={handleEnterConnection} />
-          </div>
-        </div>
-        <Toaster position="top-center" richColors />
-      </>
-    )
-  }
-
   return (
     <ReactFlowProvider>
       <SidebarProvider open={false} onOpenChange={() => {}}>
-        <div className="flex h-svh w-full flex-col">
+        <div className="flex h-svh w-full flex-col" style={{ background: 'var(--bg-canvas)' }}>
           <TitleBar />
-          <div className="h-10 shrink-0 border-b border-border px-3" style={{ background: 'var(--bg-toolbar)' }}>
-            <div className="flex h-full items-center">
-              <Toolbar onBack={handleBackToWelcome} />
-            </div>
-          </div>
+          {activeConnectionId ? (
+            <Suspense fallback={<WorkspaceFallback />}>
+              <div className="h-10 shrink-0 border-b border-border px-3" style={{ background: 'var(--bg-toolbar)' }}>
+                <div className="flex h-full items-center">
+                  <Toolbar onBack={handleBackToWelcome} />
+                </div>
+              </div>
 
-          <div className="flex min-h-0 flex-1">
-            <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} />
-            <div className="min-w-0 flex-1">
-              <MainLayout
-                left={
-                  <div className="flex h-full flex-col overflow-hidden">
-                    <div className="min-h-0 flex-1 overflow-hidden">
-                      {activeTab === SIDEBAR_TABS.collection ? <CollectionBrowser /> : <ProtoBrowser />}
-                    </div>
-                  </div>
-                }
-                tabs={<CanvasTabs />}
-                center={
-                  activeTabId ? (
-                    <FlowCanvas />
-                  ) : (
-                    <div
-                      className="flex h-full flex-col items-center justify-center text-muted-foreground"
-                      onDragOver={onEmptyDragOver}
-                      onDrop={onEmptyDrop}
-                    >
-                      <img src="./remind-2.png" alt="remind" className="-mb-7 size-32 object-contain" />
-                      <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight">
-                        Click + to create a tab, or drag in Cg / Gc messages
-                      </h3>
-                    </div>
-                  )
-                }
-                bottom={<LogPanel />}
-              />
+              <div className="flex min-h-0 flex-1">
+                <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+                <div className="min-w-0 flex-1">
+                  <MainLayout
+                    left={
+                      <div className="flex h-full flex-col overflow-hidden">
+                        <div className="min-h-0 flex-1 overflow-hidden">
+                          {activeTab === SIDEBAR_TABS.collection ? <CollectionBrowser /> : <ProtoBrowser />}
+                        </div>
+                      </div>
+                    }
+                    tabs={<CanvasTabs />}
+                    center={
+                      activeTabId ? (
+                        <FlowCanvas />
+                      ) : (
+                        <div
+                          className="flex h-full flex-col items-center justify-center text-muted-foreground"
+                          onDragOver={onEmptyDragOver}
+                          onDrop={onEmptyDrop}
+                        >
+                          <img src="./remind-2.png" alt="remind" className="-mb-7 size-32 object-contain" />
+                          <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight">
+                            Click + to create a tab, or drag in Cg / Gc messages
+                          </h3>
+                        </div>
+                      )
+                    }
+                    bottom={<LogPanel />}
+                  />
+                </div>
+              </div>
+
+              <PropertySheet />
+            </Suspense>
+          ) : (
+            <div className="flex min-h-0 flex-1">
+              <WelcomePage onEnterConnection={handleEnterConnection} />
             </div>
-          </div>
+          )}
         </div>
-        <PropertySheet />
         <Toaster position="top-center" richColors />
       </SidebarProvider>
     </ReactFlowProvider>
@@ -276,4 +379,3 @@ function App() {
 }
 
 export default App
-
