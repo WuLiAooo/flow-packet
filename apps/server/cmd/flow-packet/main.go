@@ -252,7 +252,6 @@ func registerConnHandlers(srv *api.Server, state *api.AppState, tcpClient *netwo
 		}
 
 		if req.ConnectionID != "" {
-			state.EnsureSharedSchemaLoaded()
 			*activeConnectionID = req.ConnectionID
 			if cs := state.GetConnState(req.ConnectionID); cs != nil && (cs.ParseResult != nil || cs.ThriftResult != nil) {
 				_ = configureRunnerForConnState(runner, cs)
@@ -309,7 +308,6 @@ func registerFlowHandlers(srv *api.Server, legacyRunner *engine.Runner, state *a
 			return nil, fmt.Errorf("connectionId and deviceId are required")
 		}
 
-		state.EnsureSharedSchemaLoaded()
 		cs := state.GetConnState(req.ConnectionID)
 		if cs == nil {
 			return nil, fmt.Errorf("connection state not found")
@@ -356,7 +354,6 @@ func registerFlowHandlers(srv *api.Server, legacyRunner *engine.Runner, state *a
 			return nil, fmt.Errorf("invalid payload: %w", err)
 		}
 
-		state.EnsureSharedSchemaLoaded()
 		cs := state.GetConnState(req.ConnectionID)
 		if cs == nil {
 			return nil, fmt.Errorf("connection state not found")

@@ -162,13 +162,6 @@ message Ping { int64 timestamp = 1; }
 	}
 
 	state := NewAppState(tmpDir)
-	if state.schemaLoaded {
-		t.Fatalf("shared schema should not load during startup")
-	}
-	if _, err := os.Stat(filepath.Join(state.SchemaDir, "test.proto")); !os.IsNotExist(err) {
-		t.Fatalf("global schema should not exist before first access: %v", err)
-	}
-
 	protoResult, thriftResult := state.getSharedSchemaResults()
 	if thriftResult != nil {
 		t.Fatalf("unexpected thrift schema after migration")

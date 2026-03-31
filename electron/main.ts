@@ -1,15 +1,14 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+﻿import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 
+// 绂佺敤 GPU 纭欢鍔犻€燂紝淇 Windows 鏃犺竟妗嗙獥鍙ｄ笅鐢诲竷鎷栨嫿鍜岃繛绾跨殑娓叉煋娈嬪奖闂
 app.disableHardwareAcceleration()
 
 let mainWindow: BrowserWindow | null = null
 let goProcess: ChildProcess | null = null
 let backendPort: number | null = null
-let backendStartupPromise: Promise<number> | null = null
-
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
 const isDevMode = !app.isPackaged
 const BACKEND_STARTUP_TIMEOUT_MS = 30000
@@ -41,9 +40,10 @@ function getGoCommand(): string {
 
 function getGoExecutablePath(): string {
   if (isDevMode) {
+    // 寮€鍙戞ā寮忥細浣跨敤 go run 鎴栭缂栬瘧鐨勪簩杩涘埗
     return getDevBackendDir()
   }
-
+  // 鐢熶骇妯″紡锛氭墦鍖呯殑浜岃繘鍒舵枃浠?
   const ext = process.platform === 'win32' ? '.exe' : ''
   return path.join(process.resourcesPath, 'go-backend', `flow-packet${ext}`)
 }
@@ -71,7 +71,6 @@ function startGoBackend(): Promise<number> {
 
     const cwd = isDevMode ? getDevBackendDir() : undefined
 
-    backendPort = null
     goProcess = spawn(cmd, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -80,16 +79,14 @@ function startGoBackend(): Promise<number> {
     goProcess.stdout?.on('data', (data: Buffer) => {
       const output = data.toString()
       const match = output.match(/PORT:(\d+)/)
-      if (!match) {
-        return
-      }
-
-      const port = parseInt(match[1], 10)
-      backendPort = port
-      if (!settled) {
-        settled = true
-        clearTimeout(timeout)
-        resolve(port)
+      if (match) {
+        const port = parseInt(match[1])
+        backendPort = port
+        if (!settled) {
+          settled = true
+          clearTimeout(timeout)
+          resolve(port)
+        }
       }
     })
 
@@ -108,72 +105,36 @@ function startGoBackend(): Promise<number> {
     goProcess.on('exit', (code) => {
       console.log(`[go-backend] exited with code ${code}`)
       goProcess = null
-      backendPort = null
-      backendStartupPromise = null
-      if (!settled) {
-        settled = true
-        clearTimeout(timeout)
-        reject(new Error(`Go backend exited before reporting port (code ${code ?? 'unknown'})`))
-      }
     })
   })
-}
-
-function ensureGoBackendStarted(): Promise<number> {
-  if (backendPort !== null) {
-    return Promise.resolve(backendPort)
-  }
-  if (backendStartupPromise) {
-    return backendStartupPromise
-  }
-
-  backendStartupPromise = startGoBackend()
-    .then((port) => {
-      backendPort = port
-      return port
-    })
-    .catch((err) => {
-      backendStartupPromise = null
-      throw err
-    })
-
-  return backendStartupPromise
 }
 
 function stopGoBackend(): Promise<void> {
   return new Promise((resolve) => {
     if (!goProcess) {
-      backendPort = null
-      backendStartupPromise = null
       resolve()
       return
     }
 
-    const currentProcess = goProcess
     const forceTimeout = setTimeout(() => {
-      if (goProcess === currentProcess && goProcess) {
+      if (goProcess) {
         goProcess.kill('SIGKILL')
         goProcess = null
       }
-      backendPort = null
-      backendStartupPromise = null
       resolve()
     }, 5000)
 
-    currentProcess.once('exit', () => {
+    goProcess.on('exit', () => {
       clearTimeout(forceTimeout)
-      if (goProcess === currentProcess) {
-        goProcess = null
-      }
-      backendPort = null
-      backendStartupPromise = null
+      goProcess = null
       resolve()
     })
 
+    // 鍙戦€?SIGTERM 璇锋眰浼橀泤閫€鍑?
     if (process.platform === 'win32') {
-      currentProcess.kill()
+      goProcess.kill()
     } else {
-      currentProcess.kill('SIGTERM')
+      goProcess.kill('SIGTERM')
     }
   })
 }
@@ -194,13 +155,15 @@ async function createWindow() {
     },
   })
 
+  // 寮€鍙戞ā寮忓姞杞?Vite 寮€鍙戞湇鍔″櫒锛岀敓浜фā寮忓姞杞芥墦鍖呮枃浠?
   if (isDevMode) {
-    await mainWindow.loadURL(DEV_SERVER_URL)
+    mainWindow.loadURL(DEV_SERVER_URL)
     mainWindow.webContents.openDevTools()
   } else {
-    await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // 澶栭儴閾炬帴浣跨敤绯荤粺娴忚鍣ㄦ墦寮€
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
@@ -218,7 +181,10 @@ async function createWindow() {
   })
 }
 
-ipcMain.handle('get-backend-port', async () => ensureGoBackendStarted())
+// IPC: 娓叉煋杩涚▼鑾峰彇鍚庣绔彛鍙?
+ipcMain.handle('get-backend-port', () => backendPort)
+
+// IPC: 绐楀彛鎺у埗
 ipcMain.handle('window-minimize', () => mainWindow?.minimize())
 ipcMain.handle('window-maximize', () => {
   if (mainWindow?.isMaximized()) {
@@ -231,15 +197,14 @@ ipcMain.handle('window-close', () => mainWindow?.close())
 ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized())
 
 app.whenReady().then(async () => {
-  await createWindow()
+  try {
+    backendPort = await startGoBackend()
+    console.log(`[go-backend] started on port ${backendPort}`)
+  } catch (err) {
+    console.error('[go-backend] failed to start:', err)
+  }
 
-  ensureGoBackendStarted()
-    .then((port) => {
-      console.log(`[go-backend] started on port ${port}`)
-    })
-    .catch((err) => {
-      console.error('[go-backend] failed to start:', err)
-    })
+  await createWindow()
 })
 
 app.on('window-all-closed', async () => {
