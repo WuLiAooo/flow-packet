@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   useCallback,
   useDeferredValue,
@@ -231,7 +231,7 @@ function JsonTree({
       {isOpen && (
         <div className="ml-4 min-w-0 border-l border-border/60 pl-3">
           {entries.map(([childName, childValue]) => (
-            <JsonTree key={childName} name={childName} value={childValue} searchQuery={searchQuery} />
+            <JsonTree key={childName} name={childName} value={childValue} defaultOpen={defaultOpen} searchQuery={searchQuery} />
           ))}
         </div>
       )}
