@@ -43,6 +43,10 @@ function cleanupTransientPortals() {
     .forEach((node) => node.remove())
 }
 
+function canUseApiTab(host: string) {
+  return host === '127.0.0.1' || host.startsWith('192.168.')
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs)
@@ -59,6 +63,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>(SIDEBAR_TABS.canvas)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
+  const currentHost = useConnectionStore((s) => s.config.host)
   const setActiveConnectionId = useConnectionStore((s) => s.setActiveConnectionId)
   const activeTabId = useTabStore((s) => s.activeTabId)
   const addTab = useTabStore((s) => s.addTab)
@@ -135,6 +140,14 @@ function App() {
       window.clearTimeout(stopTimer)
     }
   }, [activeConnectionId])
+
+  const showApiTab = canUseApiTab(currentHost)
+
+  useEffect(() => {
+    if (!showApiTab && activeTab === SIDEBAR_TABS.api) {
+      setActiveTab(SIDEBAR_TABS.canvas)
+    }
+  }, [activeTab, showApiTab])
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
     useConnectionStore.getState().setState('disconnected')
@@ -225,7 +238,7 @@ function App() {
     )
   }
 
-  const isApiTab = activeTab === SIDEBAR_TABS.api
+  const isApiTab = showApiTab && activeTab === SIDEBAR_TABS.api
 
   return (
     <ReactFlowProvider>
@@ -239,7 +252,7 @@ function App() {
           </div>
 
           <div className="flex min-h-0 flex-1">
-            <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+            <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} showApiTab={showApiTab} />
             <div className="min-w-0 flex-1">
               <MainLayout
                 left={

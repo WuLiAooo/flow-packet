@@ -6,18 +6,22 @@ import { useConnectionStore } from '@/stores/connectionStore'
 
 type PanelTab = 'collection' | 'api'
 
+function canUseApiTab(host: string) {
+  return host === '127.0.0.1' || host.startsWith('192.168.')
+}
+
 export function CollectionPanel() {
   const host = useConnectionStore((s) => s.config.host)
-  const isLocalHost = host === '127.0.0.1'
+  const showApiTab = canUseApiTab(host)
   const [activeTab, setActiveTab] = useState<PanelTab>('collection')
 
   useEffect(() => {
-    if (!isLocalHost && activeTab !== 'collection') {
+    if (!showApiTab && activeTab !== 'collection') {
       setActiveTab('collection')
     }
-  }, [activeTab, isLocalHost])
+  }, [activeTab, showApiTab])
 
-  if (!isLocalHost) {
+  if (!showApiTab) {
     return <CollectionBrowser />
   }
 
