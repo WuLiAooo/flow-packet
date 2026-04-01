@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const maxShortSequence = uint32(32767)
+
 // SeqContext tracks transport sequences and pending response waiters.
 type SeqContext struct {
 	mu      sync.Mutex
@@ -32,7 +34,7 @@ func (c *SeqContext) NextSeq() (uint32, chan []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.counter++
+	c.counter = nextSequenceValue(c.counter)
 	seq := c.counter
 	ch := make(chan []byte, 1)
 	c.pending[seq] = ch
@@ -44,7 +46,7 @@ func (c *SeqContext) NextSeqValue() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.counter++
+	c.counter = nextSequenceValue(c.counter)
 	return c.counter
 }
 
@@ -140,4 +142,11 @@ func (c *SeqContext) ResetTo(counter uint32) {
 // Reset clears all waiters and resets the counter to zero.
 func (c *SeqContext) Reset() {
 	c.ResetTo(0)
+}
+
+func nextSequenceValue(current uint32) uint32 {
+	if current >= maxShortSequence {
+		return 0
+	}
+	return current + 1
 }

@@ -187,6 +187,22 @@ func TestSeqContextReset(t *testing.T) {
 	}
 }
 
+func TestSeqContextWrapsAfterShortMax(t *testing.T) {
+	ctx := NewSeqContextWithCounter(maxShortSequence - 1)
+
+	if seq := ctx.NextSeqValue(); seq != maxShortSequence {
+		t.Fatalf("seq = %d, want %d", seq, maxShortSequence)
+	}
+
+	if seq := ctx.NextSeqValue(); seq != 0 {
+		t.Fatalf("seq = %d, want 0", seq)
+	}
+
+	if seq, _ := ctx.NextSeq(); seq != 1 {
+		t.Fatalf("seq = %d, want 1", seq)
+	}
+}
+
 func TestRunnerExplicitWaitNodeConsumesBufferedResponse(t *testing.T) {
 	runner := NewRunner(defaultPacketConfig())
 	runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
