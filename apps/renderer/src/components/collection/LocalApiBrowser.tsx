@@ -1,6 +1,7 @@
 import {
   Fragment,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -17,6 +18,8 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors data-[active-search-hit=true]:bg-amber-400 data-[active-search-hit=true]:ring-1 data-[active-search-hit=true]:ring-amber-700'
+const API_ROW_HEIGHT = 92
+const API_LIST_OVERSCAN = 8
 
 function sortParamEntries(params: Record<string, string> | null) {
   return Object.entries(params ?? {}).sort((a, b) => a[0].localeCompare(b[0]))
@@ -179,9 +182,13 @@ export function LocalApiBrowser() {
   const [loadError, setLoadError] = useState('')
   const [totalResultMatches, setTotalResultMatches] = useState(0)
   const [activeResultMatchIndex, setActiveResultMatchIndex] = useState(0)
+  const [listScrollTop, setListScrollTop] = useState(0)
+  const [listViewportHeight, setListViewportHeight] = useState(0)
   const resultContentRef = useRef<HTMLDivElement>(null)
+  const listViewportRef = useRef<HTMLDivElement>(null)
 
   const normalizedSearch = useMemo(() => normalizeSearchText(search), [search])
+  const deferredSearch = useDeferredValue(normalizedSearch)
   const normalizedResultSearch = useMemo(() => resultSearch.trim().toLowerCase(), [resultSearch])
   const uniqueApiItems = useMemo(() => dedupeApiItems(apiItems), [apiItems])
 
@@ -211,12 +218,33 @@ export function LocalApiBrowser() {
     void loadApis()
   }, [])
 
+  useEffect(() => {
+    const viewport = listViewportRef.current
+    if (!viewport) return
+
+    const updateSize = () => {
+      setListViewportHeight(viewport.clientHeight)
+    }
+
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const viewport = listViewportRef.current
+    if (!viewport) return
+    viewport.scrollTop = 0
+    setListScrollTop(0)
+  }, [deferredSearch])
+
   const filteredItems = useMemo(() => {
-    if (!normalizedSearch) {
+    if (!deferredSearch) {
       return uniqueApiItems
     }
 
-    const tokens = normalizedSearch.split(/\s+/).filter(Boolean)
+    const tokens = deferredSearch.split(/\s+/).filter(Boolean)
     const compactTokens = tokens.map((token) => compactSearchText(token))
 
     return uniqueApiItems
@@ -234,15 +262,15 @@ export function LocalApiBrowser() {
         }
 
         let score = 0
-        if (index.shortName.startsWith(normalizedSearch)) score += 8
-        if (index.shortName.includes(normalizedSearch)) score += 4
-        if (index.comment.includes(normalizedSearch)) score += 2
+        if (index.shortName.startsWith(deferredSearch)) score += 8
+        if (index.shortName.includes(deferredSearch)) score += 4
+        if (index.comment.includes(deferredSearch)) score += 2
         return { item, score }
       })
       .filter((entry): entry is { item: LocalGameApiInfo; score: number } => entry !== null)
       .sort((a, b) => b.score - a.score || a.item.cmd.localeCompare(b.item.cmd))
       .map((entry) => entry.item)
-  }, [normalizedSearch, uniqueApiItems])
+  }, [deferredSearch, uniqueApiItems])
 
   useEffect(() => {
     if (filteredItems.length === 0) {
@@ -270,6 +298,12 @@ export function LocalApiBrowser() {
       return next
     })
   }, [paramEntries])
+
+  const totalListHeight = filteredItems.length * API_ROW_HEIGHT
+  const visibleStartIndex = Math.max(Math.floor(listScrollTop / API_ROW_HEIGHT) - API_LIST_OVERSCAN, 0)
+  const visibleCount = Math.max(Math.ceil(listViewportHeight / API_ROW_HEIGHT) + API_LIST_OVERSCAN * 2, API_LIST_OVERSCAN * 2)
+  const visibleEndIndex = Math.min(visibleStartIndex + visibleCount, filteredItems.length)
+  const visibleItems = filteredItems.slice(visibleStartIndex, visibleEndIndex)
 
   const formattedResult = useMemo(() => formatResultText(result), [result])
   const resultLineCount = useMemo(() => (formattedResult ? formattedResult.split('\n').length : 0), [formattedResult])
@@ -403,53 +437,65 @@ export function LocalApiBrowser() {
             </div>
           </div>
 
-          <div key={normalizedSearch || 'all'} className="min-h-0 flex-1 overflow-y-auto p-3">
-            <div className="space-y-2">
-              {filteredItems.map((item) => {
-                const selected = item.cmd === selectedCmd
-                const paramCount = Object.keys(item.params ?? {}).length
-                const { namespace, shortName } = splitApiCommand(item.cmd)
+          <div ref={listViewportRef} className="min-h-0 flex-1 overflow-y-auto p-3" onScroll={(event) => setListScrollTop(event.currentTarget.scrollTop)}>
+            {filteredItems.length > 0 ? (
+              <div style={{ height: totalListHeight, position: 'relative' }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: visibleStartIndex * API_ROW_HEIGHT,
+                    left: 0,
+                    right: 0,
+                  }}
+                  className="space-y-2"
+                >
+                  {visibleItems.map((item) => {
+                    const selected = item.cmd === selectedCmd
+                    const paramCount = Object.keys(item.params ?? {}).length
+                    const { namespace, shortName } = splitApiCommand(item.cmd)
 
-                return (
-                  <button
-                    key={item.cmd}
-                    type="button"
-                    onClick={() => setSelectedCmd(item.cmd)}
-                    className={cn(
-                      'w-full rounded-lg border px-3 py-3 text-left transition-colors',
-                      selected
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border bg-background hover:border-primary/40 hover:bg-accent/50'
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <div className="truncate text-sm font-semibold text-foreground">
-                            {renderHighlightedText(shortName, normalizedSearch)}
+                    return (
+                      <button
+                        key={item.cmd}
+                        type="button"
+                        onClick={() => setSelectedCmd(item.cmd)}
+                        className={cn(
+                          'h-[84px] w-full rounded-lg border px-3 py-3 text-left transition-colors',
+                          selected
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border bg-background hover:border-primary/40 hover:bg-accent/50'
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="truncate text-sm font-semibold text-foreground">
+                                {renderHighlightedText(shortName, deferredSearch)}
+                              </div>
+                              {namespace ? (
+                                <span className="shrink-0 text-[11px] text-muted-foreground">{namespace}</span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {renderHighlightedText(item.comment || '\u65e0\u63cf\u8ff0', deferredSearch)}
+                            </div>
                           </div>
-                          {namespace ? (
-                            <span className="shrink-0 text-[11px] text-muted-foreground">{namespace}</span>
-                          ) : null}
+                          <Badge variant={selected ? 'default' : 'secondary'} className="shrink-0">
+                            {paramCount}
+                          </Badge>
                         </div>
-                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {renderHighlightedText(item.comment || '\u65e0\u63cf\u8ff0', normalizedSearch)}
-                        </div>
-                      </div>
-                      <Badge variant={selected ? 'default' : 'secondary'} className="shrink-0">
-                        {paramCount}
-                      </Badge>
-                    </div>
-                  </button>
-                )
-              })}
-
-              {!loading && filteredItems.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                  {loadError || '\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684 API'}
+                      </button>
+                    )
+                  })}
                 </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
+
+            {!loading && filteredItems.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                {loadError || '\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684 API'}
+              </div>
+            ) : null}
           </div>
         </section>
 
