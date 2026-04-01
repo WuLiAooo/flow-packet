@@ -9,9 +9,10 @@ import { cn } from '@/lib/utils'
 interface MainLayoutProps {
   left: React.ReactNode
   center: React.ReactNode
-  bottom: React.ReactNode
+  bottom?: React.ReactNode
   tabs?: React.ReactNode
   showController?: boolean
+  showBottom?: boolean
 }
 
 const DEFAULT_BOTTOM_HEIGHT = 200
@@ -23,6 +24,7 @@ export function MainLayout({
   bottom,
   tabs,
   showController = true,
+  showBottom = true,
 }: MainLayoutProps) {
   const [bottomHeight, setBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT)
   const dragging = useRef(false)
@@ -65,15 +67,11 @@ export function MainLayout({
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full w-full">
-      {/* 左侧控制器 - 全高 */}
       <ResizablePanel
         defaultSize={18}
         minSize={15}
         maxSize={showController ? 50 : 0}
-        className={cn(
-          '',
-          { 'min-w-[280px]': showController }
-        )}
+        className={cn('', { 'min-w-[280px]': showController })}
       >
         <div className="h-full overflow-hidden" style={{ background: 'var(--bg-controller)' }}>
           {left}
@@ -83,44 +81,41 @@ export function MainLayout({
       <ResizableHandle
         disabled={!showController}
         className={cn(
-          'cursor-ew-resize hover:bg-primary/50 active:bg-primary transition-colors duration-200',
+          'cursor-ew-resize transition-colors duration-200 hover:bg-primary/50 active:bg-primary',
           !showController && 'hidden'
         )}
       />
 
-      {/* 右侧：画布 + 底部日志 */}
       <ResizablePanel defaultSize={82}>
-        <div ref={containerRef} className="flex flex-col h-full">
+        <div ref={containerRef} className="flex h-full flex-col">
           {tabs}
-          <div className="flex-1 min-h-0 relative overflow-hidden" style={{ background: 'var(--bg-canvas)' }}>
+          <div className="min-h-0 flex-1 overflow-hidden" style={{ background: 'var(--bg-canvas)' }}>
             {center}
           </div>
 
-          {/* 底部执行日志 */}
-          <div
-            className="shrink-0 flex flex-col border-t border-border"
-            style={{
-              background: 'var(--bg-panel)',
-              height: bottomHeight,
-            }}
-          >
-            {/* 拖拽手柄 */}
+          {showBottom && bottom ? (
             <div
-              className="h-1 shrink-0 cursor-ns-resize hover:bg-primary/50 active:bg-primary transition-colors duration-200"
-              onMouseDown={onMouseDown}
-            />
-            <div
-              className="flex items-center h-7 shrink-0 select-none border-b border-border"
-              style={{ padding: '0 12px 0 22px' }}
+              className="flex shrink-0 flex-col border-t border-border"
+              style={{
+                background: 'var(--bg-panel)',
+                height: bottomHeight,
+              }}
             >
-              <span className="text-xs font-medium text-muted-foreground">
-                执行日志
-              </span>
+              <div
+                className="h-1 shrink-0 cursor-ns-resize transition-colors duration-200 hover:bg-primary/50 active:bg-primary"
+                onMouseDown={onMouseDown}
+              />
+              <div
+                className="flex h-7 shrink-0 items-center select-none border-b border-border"
+                style={{ padding: '0 12px 0 22px' }}
+              >
+                <span className="text-xs font-medium text-muted-foreground">{'\u6267\u884c\u65e5\u5fd7'}</span>
+              </div>
+              <div className="flex-1 overflow-auto">
+                {bottom}
+              </div>
             </div>
-            <div className="flex-1 overflow-auto">
-              {bottom}
-            </div>
-          </div>
+          ) : null}
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>

@@ -1,5 +1,15 @@
-﻿import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Blocks, Loader2, Play, RefreshCw, Search, X } from 'lucide-react'
+import {
+  Fragment,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react'
+import { Blocks, ChevronDown, ChevronUp, Loader2, Play, RefreshCw, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { executeLocalGameApi, listLocalGameApis, type LocalGameApiExecuteResult, type LocalGameApiInfo } from '@/services/api'
 import { Button } from '@/components/ui/button'
@@ -7,6 +17,8 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+
+const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors data-[active-search-hit=true]:bg-amber-400 data-[active-search-hit=true]:ring-1 data-[active-search-hit=true]:ring-amber-700'
 
 function sortParamEntries(params: Record<string, string> | null) {
   return Object.entries(params ?? {}).sort((a, b) => a[0].localeCompare(b[0]))
@@ -28,8 +40,6 @@ function buildApiSearchIndex(item: LocalGameApiInfo) {
   const fullText = [
     item.cmd,
     item.comment,
-    item.classDeclaring,
-    item.returnType,
     paramText,
   ].filter(Boolean).join(' ')
 
@@ -73,15 +83,40 @@ function formatResultText(result: LocalGameApiExecuteResult | null) {
   }
 }
 
-function countMatches(text: string, query: string) {
-  const keyword = query.trim()
-  if (!text || !keyword) {
-    return 0
+function getSearchHits(container: HTMLDivElement | null): HTMLElement[] {
+  if (!container) return []
+  return Array.from(container.querySelectorAll('[data-search-hit="true"]'))
+}
+
+function highlightResultText(text: string, query: string): ReactNode {
+  if (!query) return text
+  const normalizedText = text.toLowerCase()
+  const normalizedQuery = query.toLowerCase()
+  if (!normalizedText.includes(normalizedQuery)) return text
+
+  const parts: ReactNode[] = []
+  let start = 0
+  let index = normalizedText.indexOf(normalizedQuery, start)
+
+  while (index !== -1) {
+    if (index > start) {
+      parts.push(text.slice(start, index))
+    }
+    const end = index + query.length
+    parts.push(
+      <mark key={`${index}-${end}`} data-search-hit="true" className={resultHighlightClassName}>
+        {text.slice(index, end)}
+      </mark>
+    )
+    start = end
+    index = normalizedText.indexOf(normalizedQuery, start)
   }
 
-  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(escaped, 'giu')
-  return text.match(regex)?.length ?? 0
+  if (start < text.length) {
+    parts.push(text.slice(start))
+  }
+
+  return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
 
 function renderHighlightedText(text: string, query: string) {
@@ -116,9 +151,12 @@ export function LocalApiBrowser() {
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<LocalGameApiExecuteResult | null>(null)
   const [loadError, setLoadError] = useState('')
+  const [totalResultMatches, setTotalResultMatches] = useState(0)
+  const [activeResultMatchIndex, setActiveResultMatchIndex] = useState(0)
+  const resultContentRef = useRef<HTMLDivElement>(null)
 
   const deferredSearch = useDeferredValue(search)
-  const deferredResultSearch = useDeferredValue(resultSearch)
+  const deferredResultSearch = useDeferredValue(resultSearch.trim().toLowerCase())
 
   const loadApis = async () => {
     setLoading(true)
@@ -152,12 +190,15 @@ export function LocalApiBrowser() {
     }
 
     const tokens = normalizedSearch.split(/\s+/).filter(Boolean)
-    const compactQuery = compactSearchText(deferredSearch)
+    const compactTokens = tokens.map((token) => compactSearchText(token))
 
     return apiItems
       .map((item) => {
         const index = buildApiSearchIndex(item)
-        const matched = tokens.every((token) => index.normalized.includes(token) || index.compact.includes(compactSearchText(token)))
+        const matched = tokens.every((token, idx) => {
+          const compactToken = compactTokens[idx]
+          return index.normalized.includes(token) || (compactToken.length > 0 && index.compact.includes(compactToken))
+        })
         if (!matched) {
           return null
         }
@@ -168,8 +209,6 @@ export function LocalApiBrowser() {
         if (normalizedCmd.startsWith(normalizedSearch)) score += 6
         if (normalizedCmd.includes(normalizedSearch)) score += 4
         if (normalizedComment.includes(normalizedSearch)) score += 3
-        if (compactQuery && compactSearchText(item.cmd).includes(compactQuery)) score += 2
-        if (compactQuery && compactSearchText(item.comment).includes(compactQuery)) score += 1
 
         return { item, score }
       })
@@ -189,8 +228,8 @@ export function LocalApiBrowser() {
   }, [filteredItems, selectedCmd])
 
   const selectedApi = useMemo(
-    () => apiItems.find((item) => item.cmd === selectedCmd) ?? null,
-    [apiItems, selectedCmd]
+    () => filteredItems.find((item) => item.cmd === selectedCmd) ?? null,
+    [filteredItems, selectedCmd]
   )
 
   const paramEntries = useMemo(() => sortParamEntries(selectedApi?.params ?? null), [selectedApi])
@@ -207,7 +246,66 @@ export function LocalApiBrowser() {
 
   const formattedResult = useMemo(() => formatResultText(result), [result])
   const resultLineCount = useMemo(() => (formattedResult ? formattedResult.split('\n').length : 0), [formattedResult])
-  const resultMatchCount = useMemo(() => countMatches(formattedResult, deferredResultSearch), [formattedResult, deferredResultSearch])
+  const hasResultSearch = deferredResultSearch.length > 0
+  const resultMatchLabel = hasResultSearch
+    ? totalResultMatches > 0
+      ? `${activeResultMatchIndex + 1}/${totalResultMatches}`
+      : '0/0'
+    : '0/0'
+
+  useEffect(() => {
+    if (!hasResultSearch) {
+      setTotalResultMatches(0)
+      setActiveResultMatchIndex(0)
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const hits = getSearchHits(resultContentRef.current)
+      setTotalResultMatches(hits.length)
+      setActiveResultMatchIndex((current) => {
+        if (hits.length === 0) return 0
+        return current >= hits.length ? 0 : current
+      })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [formattedResult, hasResultSearch])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const hits = getSearchHits(resultContentRef.current)
+      hits.forEach((hit, index) => {
+        if (hasResultSearch && index === activeResultMatchIndex) {
+          hit.dataset.activeSearchHit = 'true'
+        } else {
+          delete hit.dataset.activeSearchHit
+        }
+      })
+
+      if (!hasResultSearch || hits.length === 0) return
+      const target = hits[activeResultMatchIndex] ?? hits[0]
+      target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeResultMatchIndex, formattedResult, hasResultSearch])
+
+  const jumpToResultMatch = useCallback((direction: 1 | -1) => {
+    if (totalResultMatches === 0) return
+    setActiveResultMatchIndex((current) => {
+      const next = current + direction
+      if (next < 0) return totalResultMatches - 1
+      if (next >= totalResultMatches) return 0
+      return next
+    })
+  }, [totalResultMatches])
+
+  const handleResultSearchKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    jumpToResultMatch(event.shiftKey ? -1 : 1)
+  }, [jumpToResultMatch])
 
   const handleExecute = async () => {
     if (!selectedApi) {
@@ -219,6 +317,7 @@ export function LocalApiBrowser() {
     try {
       const response = await executeLocalGameApi(selectedApi.cmd, params)
       setResult(response)
+      setActiveResultMatchIndex(0)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       toast.error('\u6267\u884c API \u5931\u8d25', { description: message })
@@ -300,16 +399,12 @@ export function LocalApiBrowser() {
                           {renderHighlightedText(item.cmd, deferredSearch)}
                         </div>
                         <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {renderHighlightedText(item.comment || item.classDeclaring || '\u65e0\u63cf\u8ff0', deferredSearch)}
+                          {renderHighlightedText(item.comment || '\u65e0\u63cf\u8ff0', deferredSearch)}
                         </div>
                       </div>
                       <Badge variant={selected ? 'default' : 'secondary'} className="shrink-0">
                         {paramCount}
                       </Badge>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                      <Badge variant="outline" className="max-w-full truncate">{item.classDeclaring || '\u672a\u5206\u7c7b'}</Badge>
-                      <Badge variant="outline" className="max-w-full truncate">{item.returnType || 'String'}</Badge>
                     </div>
                   </button>
                 )
@@ -375,40 +470,63 @@ export function LocalApiBrowser() {
           </div>
 
           <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-4 py-3 text-[11px]">
               <div>
                 <div className="text-sm font-semibold text-foreground">{'\u8fd4\u56de\u5185\u5bb9'}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {result
-                    ? `HTTP ${result.statusCode} | ${resultLineCount} \u884c${deferredResultSearch ? ` | ${resultMatchCount} \u5904\u5339\u914d` : ''}`
+                    ? `HTTP ${result.statusCode} | ${resultLineCount} \u884c`
                     : '\u6267\u884c API \u540e\u5728\u8fd9\u91cc\u67e5\u770b\u7ed3\u679c'}
                 </div>
               </div>
-              <div className="relative w-full max-w-72">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative min-w-[220px] flex-1 sm:max-w-[66%] sm:ml-auto">
+                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={resultSearch}
                   onChange={(event) => setResultSearch(event.target.value)}
+                  onKeyDown={handleResultSearchKeyDown}
                   placeholder={'\u641c\u7d22\u8fd4\u56de\u5185\u5bb9'}
-                  className="h-9 border-border bg-background pl-9 pr-9"
+                  className="h-8 border-border bg-background pl-7 pr-7 text-[11px]"
                 />
                 {resultSearch ? (
                   <button
                     type="button"
                     onClick={() => setResultSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    title="Clear search"
                   >
-                    <X className="size-4" />
+                    <X className="size-3" />
                   </button>
                 ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                <span>{resultMatchLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => jumpToResultMatch(-1)}
+                  disabled={totalResultMatches === 0}
+                  className="inline-flex items-center rounded border border-border/60 p-1 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Previous match"
+                >
+                  <ChevronUp className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => jumpToResultMatch(1)}
+                  disabled={totalResultMatches === 0}
+                  className="inline-flex items-center rounded border border-border/60 p-1 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Next match"
+                >
+                  <ChevronDown className="size-3" />
+                </button>
               </div>
             </div>
 
             <ScrollArea className="min-h-0 flex-1">
-              <div className="p-4">
+              <div ref={resultContentRef} className="p-4">
                 <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/35 p-4 text-xs leading-6 text-foreground">
                   {formattedResult
-                    ? renderHighlightedText(formattedResult, deferredResultSearch)
+                    ? highlightResultText(formattedResult, deferredResultSearch)
                     : '\u6682\u65e0\u7ed3\u679c'}
                 </pre>
               </div>

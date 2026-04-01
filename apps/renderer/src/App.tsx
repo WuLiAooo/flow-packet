@@ -225,6 +225,8 @@ function App() {
     )
   }
 
+  const isApiTab = activeTab === SIDEBAR_TABS.api
+
   return (
     <ReactFlowProvider>
       <SidebarProvider open={false} onOpenChange={() => {}}>
@@ -247,9 +249,9 @@ function App() {
                     </div>
                   </div>
                 }
-                tabs={activeTab === SIDEBAR_TABS.api ? undefined : <CanvasTabs />}
+                tabs={isApiTab ? undefined : <CanvasTabs />}
                 center={
-                  activeTab === SIDEBAR_TABS.api ? (
+                  isApiTab ? (
                     <LocalApiBrowser />
                   ) : activeTabId ? (
                     <FlowCanvas />
@@ -266,8 +268,9 @@ function App() {
                     </div>
                   )
                 }
-                bottom={<LogPanel />}
-                showController={activeTab !== SIDEBAR_TABS.api}
+                bottom={isApiTab ? undefined : <LogPanel />}
+                showController={!isApiTab}
+                showBottom={!isApiTab}
               />
             </div>
           </div>
