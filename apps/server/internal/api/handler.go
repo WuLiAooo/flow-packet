@@ -2,14 +2,18 @@ package api
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -135,6 +139,36 @@ type RouteMapping struct {
 	StringRoute string `json:"stringRoute,omitempty"`
 	RequestMsg  string `json:"requestMsg"`
 	ResponseMsg string `json:"responseMsg"`
+}
+
+type GameAPIInfo struct {
+	Cmd            string            `json:"cmd"`
+	Params         map[string]string `json:"params"`
+	ReturnType     string            `json:"returnType"`
+	Comment        string            `json:"comment"`
+	ClassDeclaring string            `json:"classDeclaring"`
+}
+
+type gameAPIExecuteResult struct {
+	RawText    string `json:"rawText"`
+	Parsed     any    `json:"parsed,omitempty"`
+	StatusCode int    `json:"statusCode"`
+}
+
+type gameAPIConfigFile struct {
+	API struct {
+		Endpoint string `json:"endpoint"`
+		Password string `json:"password"`
+		AuthKey  string `json:"auth_key"`
+		URL      string `json:"url"`
+	} `json:"api"`
+}
+
+type gameAPIClientConfig struct {
+	User     string
+	Password string
+	AuthKey  string
+	URL      string
 }
 
 func (rm RouteMapping) Key() string {
@@ -351,6 +385,8 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("collection.folder.delete", makeCollectionFolderDeleteHandler(state))
 	srv.Handle("collection.folder.move", makeCollectionFolderMoveHandler(state))
 	srv.Handle("collection.move", makeCollectionMoveHandler(state))
+	srv.Handle("gameapi.list", makeGameAPIListHandler())
+	srv.Handle("gameapi.execute", makeGameAPIExecuteHandler())
 }
 func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1371,6 +1407,192 @@ func makeCollectionMoveHandler(state *AppState) HandlerFunc {
 		}
 		return map[string]string{"status": "ok"}, nil
 	}
+}
+
+func makeGameAPIListHandler() HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		_, rawText, parsed, err := callGameAPI("listApi", nil)
+		if err != nil {
+			return nil, err
+		}
+
+		items, err := extractGameAPIItems(parsed)
+		if err != nil {
+			return nil, fmt.Errorf("unexpected listApi response: %s", rawText)
+		}
+
+		return map[string]any{"items": items}, nil
+	}
+}
+
+func extractGameAPIItems(parsed any) ([]GameAPIInfo, error) {
+	if parsed == nil {
+		return nil, fmt.Errorf("empty response")
+	}
+
+	if items, ok := parsed.([]any); ok {
+		return decodeGameAPIItems(items)
+	}
+
+	payload, ok := parsed.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type %T", parsed)
+	}
+
+	if result, exists := payload["result"]; exists {
+		items, ok := result.([]any)
+		if !ok {
+			return nil, fmt.Errorf("result field is not an array")
+		}
+		return decodeGameAPIItems(items)
+	}
+
+	return nil, fmt.Errorf("missing result field")
+}
+
+func decodeGameAPIItems(items []any) ([]GameAPIInfo, error) {
+	payloadBytes, err := json.Marshal(items)
+	if err != nil {
+		return nil, err
+	}
+
+	var decoded []GameAPIInfo
+	if err := json.Unmarshal(payloadBytes, &decoded); err != nil {
+		return nil, err
+	}
+	return decoded, nil
+}
+func makeGameAPIExecuteHandler() HandlerFunc {
+	return func(payload json.RawMessage) (any, error) {
+		var req struct {
+			Command string            `json:"command"`
+			Params  map[string]string `json:"params"`
+		}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+		if strings.TrimSpace(req.Command) == "" {
+			return nil, fmt.Errorf("command is required")
+		}
+
+		statusCode, rawText, parsed, err := callGameAPI(strings.TrimSpace(req.Command), req.Params)
+		if err != nil {
+			return nil, err
+		}
+
+		return gameAPIExecuteResult{
+			RawText:    rawText,
+			Parsed:     parsed,
+			StatusCode: statusCode,
+		}, nil
+	}
+}
+
+func callGameAPI(command string, params map[string]string) (int, string, any, error) {
+	cfg, err := loadGameAPIClientConfig()
+	if err != nil {
+		return 0, "", nil, err
+	}
+
+	timestamp := time.Now().Unix()
+	query := url.Values{}
+	query.Set("_user", cfg.User)
+	query.Set("_pass", buildGameAPIPassword(cfg.Password, cfg.AuthKey, timestamp))
+	query.Set("_cmd", command)
+	query.Set("_timestamp", strconv.FormatInt(timestamp, 10))
+	if len(params) > 0 {
+		body, err := json.Marshal(params)
+		if err != nil {
+			return 0, "", nil, fmt.Errorf("marshal game api params: %w", err)
+		}
+		query.Set("_paramType", "json")
+		query.Set("_params", string(body))
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(cfg.URL + "?" + query.Encode())
+	if err != nil {
+		return 0, "", nil, fmt.Errorf("request game api: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, "", nil, fmt.Errorf("read game api response: %w", err)
+	}
+
+	rawText := string(body)
+	parsed := parseGameAPIResponseBody(rawText)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return resp.StatusCode, rawText, parsed, fmt.Errorf("game api request failed (%d): %s", resp.StatusCode, rawText)
+	}
+	return resp.StatusCode, rawText, parsed, nil
+}
+
+func loadGameAPIClientConfig() (*gameAPIClientConfig, error) {
+	configPath := os.Getenv("FLOW_PACKET_GAME_API_CONFIG")
+	if strings.TrimSpace(configPath) == "" {
+		configPath = `C:\game-test\game-p\project\config\api_config.json`
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read game api config: %w", err)
+	}
+
+	var file gameAPIConfigFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse game api config: %w", err)
+	}
+
+	user := strings.TrimSpace(file.API.Endpoint)
+	password := strings.TrimSpace(file.API.Password)
+	authKey := strings.TrimSpace(file.API.AuthKey)
+	endpointURL := strings.TrimSpace(file.API.URL)
+	if endpointURL == "" {
+		endpointURL = "http://127.0.0.1:8070/api"
+	}
+	if user == "" || password == "" || authKey == "" {
+		return nil, fmt.Errorf("game api config is incomplete")
+	}
+
+	return &gameAPIClientConfig{
+		User:     user,
+		Password: password,
+		AuthKey:  authKey,
+		URL:      endpointURL,
+	}, nil
+}
+
+func buildGameAPIPassword(password string, authKey string, timestamp int64) string {
+	sum := md5.Sum([]byte(password + authKey + strconv.FormatInt(timestamp, 10)))
+	return hex.EncodeToString(sum[:])
+}
+
+func parseGameAPIResponseBody(raw string) any {
+	return parseNestedGameAPIResponse(strings.TrimSpace(raw), 0)
+}
+
+func parseNestedGameAPIResponse(raw string, depth int) any {
+	if raw == "" {
+		return ""
+	}
+	if depth > 3 {
+		return raw
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return raw
+	}
+	if inner, ok := parsed.(string); ok {
+		trimmed := strings.TrimSpace(inner)
+		if trimmed == "" {
+			return ""
+		}
+		return parseNestedGameAPIResponse(trimmed, depth+1)
+	}
+	return parsed
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {

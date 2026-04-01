@@ -167,3 +167,26 @@ export async function executeFlow(nodes: unknown[], edges: unknown[], connection
 export async function stopFlow() {
   return sendRequest('flow.stop')
 }
+export interface LocalGameApiInfo {
+  cmd: string
+  params: Record<string, string> | null
+  returnType: string
+  comment: string
+  classDeclaring: string
+}
+
+export interface LocalGameApiExecuteResult {
+  rawText: string
+  parsed?: unknown
+  statusCode: number
+}
+
+export async function listLocalGameApis() {
+  return sendRequest('gameapi.list') as Promise<{
+    items: LocalGameApiInfo[]
+  }>
+}
+
+export async function executeLocalGameApi(command: string, params: Record<string, string>) {
+  return sendRequest('gameapi.execute', { command, params }) as Promise<LocalGameApiExecuteResult>
+}

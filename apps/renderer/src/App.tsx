@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Toaster } from '@/components/ui/sonner'
@@ -9,6 +9,7 @@ import { Toolbar } from '@/components/layout/Toolbar'
 import { TitleBar } from '@/components/layout/TitleBar'
 import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
 import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
+import { LocalApiBrowser } from '@/components/collection/LocalApiBrowser'
 import { FlowCanvas } from '@/components/canvas/FlowCanvas'
 import { PropertySheet } from '@/components/editor/PropertySheet'
 import { LogPanel } from '@/components/execution/LogPanel'
@@ -246,9 +247,11 @@ function App() {
                     </div>
                   </div>
                 }
-                tabs={<CanvasTabs />}
+                tabs={activeTab === SIDEBAR_TABS.api ? undefined : <CanvasTabs />}
                 center={
-                  activeTabId ? (
+                  activeTab === SIDEBAR_TABS.api ? (
+                    <LocalApiBrowser />
+                  ) : activeTabId ? (
                     <FlowCanvas />
                   ) : (
                     <div
@@ -264,6 +267,7 @@ function App() {
                   )
                 }
                 bottom={<LogPanel />}
+                showController={activeTab !== SIDEBAR_TABS.api}
               />
             </div>
           </div>

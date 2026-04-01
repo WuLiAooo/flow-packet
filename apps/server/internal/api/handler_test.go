@@ -321,6 +321,24 @@ func TestRouteSetInvalid(t *testing.T) {
 	}
 }
 
+func TestParseGameAPIResponseBodyHandlesNestedJSONString(t *testing.T) {
+	parsed := parseGameAPIResponseBody("\"{\\\"ok\\\":true,\\\"count\\\":2}\"")
+	obj, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("parsed type = %T", parsed)
+	}
+	if okValue, _ := obj["ok"].(bool); !okValue {
+		t.Fatalf("ok = %v, want true", obj["ok"])
+	}
+}
+
+func TestParseGameAPIResponseBodyKeepsPlainString(t *testing.T) {
+	parsed := parseGameAPIResponseBody("done")
+	if parsed != "done" {
+		t.Fatalf("parsed = %v, want done", parsed)
+	}
+}
+
 func TestCollectionsAreSharedAcrossConnections(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "collection-global-*")
 	if err != nil {
