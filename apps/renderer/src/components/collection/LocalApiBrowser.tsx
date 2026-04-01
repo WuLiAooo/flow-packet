@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
 } from 'react'
 import { Blocks, ChevronDown, ChevronUp, Loader2, Play, RefreshCw, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -17,9 +16,15 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors data-[active-search-hit=true]:bg-amber-400 data-[active-search-hit=true]:ring-1 data-[active-search-hit=true]:ring-amber-700'
+const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors'
+const resultActiveHighlightClassName = 'bg-amber-400 ring-1 ring-amber-700'
 const API_ROW_HEIGHT = 92
 const API_LIST_OVERSCAN = 8
+
+type ResultSearchSegment = {
+  text: string
+  matchIndex: number | null
+}
 
 function sortParamEntries(params: Record<string, string> | null) {
   return Object.entries(params ?? {}).sort((a, b) => a[0].localeCompare(b[0]))
@@ -78,21 +83,52 @@ function dedupeApiItems(items: LocalGameApiInfo[]) {
   return Array.from(unique.values())
 }
 
-function normalizeResultValue(value: unknown): unknown {
-  if (typeof value !== 'string') {
+function tryParseJsonString(value: string): unknown {
+  const trimmed = value.trim()
+  if (!trimmed) {
     return value
   }
 
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return ''
+  const looksLikeJson = (
+    (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    || (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  )
+
+  if (!looksLikeJson) {
+    return value
   }
 
   try {
-    return normalizeResultValue(JSON.parse(trimmed))
+    return JSON.parse(trimmed)
   } catch {
     return value
   }
+}
+
+function normalizeStructuredValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const parsed = tryParseJsonString(value)
+    if (parsed !== value) {
+      return normalizeStructuredValue(parsed, depth + 1)
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeStructuredValue(item, depth + 1))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, normalizeStructuredValue(item, depth + 1)])
+    )
+  }
+
+  return value
 }
 
 function formatResultText(result: LocalGameApiExecuteResult | null) {
@@ -100,7 +136,7 @@ function formatResultText(result: LocalGameApiExecuteResult | null) {
     return ''
   }
 
-  const normalized = normalizeResultValue(result.parsed ?? result.rawText)
+  const normalized = normalizeStructuredValue(result.parsed ?? result.rawText)
   if (typeof normalized === 'string') {
     return normalized
   }
@@ -112,40 +148,41 @@ function formatResultText(result: LocalGameApiExecuteResult | null) {
   }
 }
 
-function getSearchHits(container: HTMLDivElement | null): HTMLElement[] {
-  if (!container) return []
-  return Array.from(container.querySelectorAll('[data-search-hit="true"]'))
-}
+function buildResultSearchModel(text: string, query: string) {
+  if (!query || !text) {
+    return {
+      count: 0,
+      segments: [{ text, matchIndex: null }] as ResultSearchSegment[],
+    }
+  }
 
-function highlightResultText(text: string, query: string): ReactNode {
-  if (!query) return text
   const normalizedText = text.toLowerCase()
   const normalizedQuery = query.toLowerCase()
-  if (!normalizedText.includes(normalizedQuery)) return text
-
-  const parts: ReactNode[] = []
+  const segments: ResultSearchSegment[] = []
   let start = 0
   let index = normalizedText.indexOf(normalizedQuery, start)
+  let matchIndex = 0
 
   while (index !== -1) {
     if (index > start) {
-      parts.push(text.slice(start, index))
+      segments.push({ text: text.slice(start, index), matchIndex: null })
     }
-    const end = index + query.length
-    parts.push(
-      <mark key={`${index}-${end}`} data-search-hit="true" className={resultHighlightClassName}>
-        {text.slice(index, end)}
-      </mark>
-    )
+
+    const end = index + normalizedQuery.length
+    segments.push({ text: text.slice(index, end), matchIndex })
+    matchIndex += 1
     start = end
     index = normalizedText.indexOf(normalizedQuery, start)
   }
 
   if (start < text.length) {
-    parts.push(text.slice(start))
+    segments.push({ text: text.slice(start), matchIndex: null })
   }
 
-  return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
+  return {
+    count: matchIndex,
+    segments,
+  }
 }
 
 function renderHighlightedText(text: string, query: string) {
@@ -180,12 +217,11 @@ export function LocalApiBrowser() {
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [result, setResult] = useState<LocalGameApiExecuteResult | null>(null)
   const [loadError, setLoadError] = useState('')
-  const [totalResultMatches, setTotalResultMatches] = useState(0)
   const [activeResultMatchIndex, setActiveResultMatchIndex] = useState(0)
   const [listScrollTop, setListScrollTop] = useState(0)
   const [listViewportHeight, setListViewportHeight] = useState(0)
-  const resultContentRef = useRef<HTMLDivElement>(null)
   const listViewportRef = useRef<HTMLDivElement>(null)
+  const resultMatchRefs = useRef<(HTMLElement | null)[]>([])
 
   const normalizedSearch = useMemo(() => normalizeSearchText(search), [search])
   const deferredSearch = useDeferredValue(normalizedSearch)
@@ -307,7 +343,12 @@ export function LocalApiBrowser() {
 
   const formattedResult = useMemo(() => formatResultText(result), [result])
   const resultLineCount = useMemo(() => (formattedResult ? formattedResult.split('\n').length : 0), [formattedResult])
+  const resultSearchModel = useMemo(
+    () => buildResultSearchModel(formattedResult, normalizedResultSearch),
+    [formattedResult, normalizedResultSearch]
+  )
   const hasResultSearch = normalizedResultSearch.length > 0
+  const totalResultMatches = resultSearchModel.count
   const resultMatchLabel = hasResultSearch
     ? totalResultMatches > 0
       ? `${activeResultMatchIndex + 1}/${totalResultMatches}`
@@ -315,42 +356,26 @@ export function LocalApiBrowser() {
     : '0/0'
 
   useEffect(() => {
-    if (!hasResultSearch) {
-      setTotalResultMatches(0)
+    if (!hasResultSearch || totalResultMatches === 0) {
       setActiveResultMatchIndex(0)
       return
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      const hits = getSearchHits(resultContentRef.current)
-      setTotalResultMatches(hits.length)
-      setActiveResultMatchIndex((current) => {
-        if (hits.length === 0) return 0
-        return current >= hits.length ? 0 : current
-      })
-    })
-
-    return () => window.cancelAnimationFrame(frame)
-  }, [formattedResult, hasResultSearch])
+    setActiveResultMatchIndex((current) => (current >= totalResultMatches ? 0 : current))
+  }, [hasResultSearch, totalResultMatches])
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const hits = getSearchHits(resultContentRef.current)
-      hits.forEach((hit, index) => {
-        if (hasResultSearch && index === activeResultMatchIndex) {
-          hit.dataset.activeSearchHit = 'true'
-        } else {
-          delete hit.dataset.activeSearchHit
-        }
-      })
+    resultMatchRefs.current = resultMatchRefs.current.slice(0, totalResultMatches)
+  }, [totalResultMatches])
 
-      if (!hasResultSearch || hits.length === 0) return
-      const target = hits[activeResultMatchIndex] ?? hits[0]
-      target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
-    })
+  useEffect(() => {
+    if (!hasResultSearch || totalResultMatches === 0) {
+      return
+    }
 
-    return () => window.cancelAnimationFrame(frame)
-  }, [activeResultMatchIndex, formattedResult, hasResultSearch])
+    const target = resultMatchRefs.current[activeResultMatchIndex]
+    target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+  }, [activeResultMatchIndex, hasResultSearch, totalResultMatches])
 
   const jumpToResultMatch = useCallback((direction: 1 | -1) => {
     if (totalResultMatches === 0) return
@@ -603,11 +628,30 @@ export function LocalApiBrowser() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
-              <div ref={resultContentRef} className="p-4">
+              <div className="p-4">
                 <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/35 p-4 text-xs leading-6 text-foreground">
-                  {formattedResult
-                    ? highlightResultText(formattedResult, normalizedResultSearch)
-                    : '\u6682\u65e0\u7ed3\u679c'}
+                  {resultSearchModel.segments.map((segment, index) => {
+                    if (segment.matchIndex === null) {
+                      return <Fragment key={`segment-${index}`}>{segment.text}</Fragment>
+                    }
+
+                    const isActive = segment.matchIndex === activeResultMatchIndex
+                    return (
+                      <mark
+                        key={`match-${segment.matchIndex}-${index}`}
+                        ref={(node) => {
+                          resultMatchRefs.current[segment.matchIndex ?? 0] = node
+                        }}
+                        className={cn(
+                          resultHighlightClassName,
+                          isActive && resultActiveHighlightClassName
+                        )}
+                      >
+                        {segment.text}
+                      </mark>
+                    )
+                  })}
+                  {!formattedResult ? '\u6682\u65e0\u7ed3\u679c' : null}
                 </pre>
               </div>
             </div>

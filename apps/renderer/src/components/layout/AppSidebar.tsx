@@ -1,4 +1,4 @@
-import { Blocks, Library, LayoutDashboard } from 'lucide-react'
+import { CodeXml, Library, LayoutDashboard } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -8,10 +8,16 @@ import {
 
 export type SidebarTab = 'canvas' | 'collection' | 'api'
 
-const navItems: { icon: typeof LayoutDashboard; value: SidebarTab; label: string }[] = [
+type NavItem = {
+  icon: typeof LayoutDashboard
+  value: SidebarTab
+  label: string
+}
+
+const navItems: NavItem[] = [
   { icon: LayoutDashboard, value: 'canvas', label: '\u753b\u5e03' },
   { icon: Library, value: 'collection', label: '\u96c6\u5408' },
-  { icon: Blocks, value: 'api', label: 'API' },
+  { icon: CodeXml, value: 'api', label: 'API' },
 ]
 
 export const SIDEBAR_TABS = {
@@ -23,14 +29,18 @@ export const SIDEBAR_TABS = {
 export function AppSidebar({
   activeTab,
   onTabChange,
+  showApiTab = true,
 }: {
   activeTab: SidebarTab
   onTabChange: (tab: SidebarTab) => void
+  showApiTab?: boolean
 }) {
+  const visibleItems = showApiTab ? navItems : navItems.filter((item) => item.value !== SIDEBAR_TABS.api)
+
   return (
     <TooltipProvider delayDuration={0}>
       <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2" style={{ background: 'var(--bg-activity)' }}>
-        {navItems.map((item) => (
+        {visibleItems.map((item) => (
           <Tooltip key={item.value}>
             <TooltipTrigger asChild>
               <button
