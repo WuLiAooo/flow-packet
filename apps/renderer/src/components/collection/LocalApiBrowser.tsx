@@ -1,7 +1,6 @@
 import {
   Fragment,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -14,7 +13,6 @@ import { toast } from 'sonner'
 import { executeLocalGameApi, listLocalGameApis, type LocalGameApiExecuteResult, type LocalGameApiInfo } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
@@ -32,21 +30,49 @@ function compactSearchText(value: string) {
   return normalizeSearchText(value).replace(/[\s_./:-]+/g, '')
 }
 
-function buildApiSearchIndex(item: LocalGameApiInfo) {
-  const paramText = Object.entries(item.params ?? {})
-    .map(([name, type]) => `${name} ${type}`)
-    .join(' ')
-
-  const fullText = [
-    item.cmd,
-    item.comment,
-    paramText,
-  ].filter(Boolean).join(' ')
+function splitApiCommand(command: string) {
+  const index = command.lastIndexOf('.')
+  if (index < 0) {
+    return {
+      namespace: '',
+      shortName: command,
+    }
+  }
 
   return {
-    normalized: normalizeSearchText(fullText),
-    compact: compactSearchText(fullText),
+    namespace: command.slice(0, index + 1),
+    shortName: command.slice(index + 1),
   }
+}
+
+function buildApiSearchIndex(item: LocalGameApiInfo) {
+  const { shortName } = splitApiCommand(item.cmd)
+  return {
+    shortName: normalizeSearchText(shortName),
+    shortNameCompact: compactSearchText(shortName),
+    comment: normalizeSearchText(item.comment),
+    commentCompact: compactSearchText(item.comment),
+  }
+}
+
+function dedupeApiItems(items: LocalGameApiInfo[]) {
+  const unique = new Map<string, LocalGameApiInfo>()
+
+  for (const item of items) {
+    const existing = unique.get(item.cmd)
+    if (!existing) {
+      unique.set(item.cmd, item)
+      continue
+    }
+
+    const existingScore = (existing.comment ? 1 : 0) + (existing.classDeclaring ? 1 : 0) + Object.keys(existing.params ?? {}).length
+    const nextScore = (item.comment ? 1 : 0) + (item.classDeclaring ? 1 : 0) + Object.keys(item.params ?? {}).length
+    if (nextScore > existingScore) {
+      unique.set(item.cmd, item)
+    }
+  }
+
+  return Array.from(unique.values())
 }
 
 function normalizeResultValue(value: unknown): unknown {
@@ -155,20 +181,22 @@ export function LocalApiBrowser() {
   const [activeResultMatchIndex, setActiveResultMatchIndex] = useState(0)
   const resultContentRef = useRef<HTMLDivElement>(null)
 
-  const deferredSearch = useDeferredValue(search)
-  const deferredResultSearch = useDeferredValue(resultSearch.trim().toLowerCase())
+  const normalizedSearch = useMemo(() => normalizeSearchText(search), [search])
+  const normalizedResultSearch = useMemo(() => resultSearch.trim().toLowerCase(), [resultSearch])
+  const uniqueApiItems = useMemo(() => dedupeApiItems(apiItems), [apiItems])
 
   const loadApis = async () => {
     setLoading(true)
     setLoadError('')
     try {
       const response = await listLocalGameApis()
-      setApiItems(response.items)
+      const uniqueItems = dedupeApiItems(response.items)
+      setApiItems(uniqueItems)
       setSelectedCmd((current) => {
-        if (current && response.items.some((item) => item.cmd === current)) {
+        if (current && uniqueItems.some((item) => item.cmd === current)) {
           return current
         }
-        return response.items[0]?.cmd ?? ''
+        return uniqueItems[0]?.cmd ?? ''
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -184,38 +212,37 @@ export function LocalApiBrowser() {
   }, [])
 
   const filteredItems = useMemo(() => {
-    const normalizedSearch = normalizeSearchText(deferredSearch)
     if (!normalizedSearch) {
-      return apiItems
+      return uniqueApiItems
     }
 
     const tokens = normalizedSearch.split(/\s+/).filter(Boolean)
     const compactTokens = tokens.map((token) => compactSearchText(token))
 
-    return apiItems
+    return uniqueApiItems
       .map((item) => {
         const index = buildApiSearchIndex(item)
         const matched = tokens.every((token, idx) => {
           const compactToken = compactTokens[idx]
-          return index.normalized.includes(token) || (compactToken.length > 0 && index.compact.includes(compactToken))
+          const nameMatched = index.shortName.includes(token) || (compactToken.length > 0 && index.shortNameCompact.includes(compactToken))
+          const commentMatched = index.comment.includes(token) || (compactToken.length > 0 && index.commentCompact.includes(compactToken))
+          return nameMatched || commentMatched
         })
+
         if (!matched) {
           return null
         }
 
         let score = 0
-        const normalizedCmd = normalizeSearchText(item.cmd)
-        const normalizedComment = normalizeSearchText(item.comment)
-        if (normalizedCmd.startsWith(normalizedSearch)) score += 6
-        if (normalizedCmd.includes(normalizedSearch)) score += 4
-        if (normalizedComment.includes(normalizedSearch)) score += 3
-
+        if (index.shortName.startsWith(normalizedSearch)) score += 8
+        if (index.shortName.includes(normalizedSearch)) score += 4
+        if (index.comment.includes(normalizedSearch)) score += 2
         return { item, score }
       })
       .filter((entry): entry is { item: LocalGameApiInfo; score: number } => entry !== null)
       .sort((a, b) => b.score - a.score || a.item.cmd.localeCompare(b.item.cmd))
       .map((entry) => entry.item)
-  }, [apiItems, deferredSearch])
+  }, [normalizedSearch, uniqueApiItems])
 
   useEffect(() => {
     if (filteredItems.length === 0) {
@@ -246,7 +273,7 @@ export function LocalApiBrowser() {
 
   const formattedResult = useMemo(() => formatResultText(result), [result])
   const resultLineCount = useMemo(() => (formattedResult ? formattedResult.split('\n').length : 0), [formattedResult])
-  const hasResultSearch = deferredResultSearch.length > 0
+  const hasResultSearch = normalizedResultSearch.length > 0
   const resultMatchLabel = hasResultSearch
     ? totalResultMatches > 0
       ? `${activeResultMatchIndex + 1}/${totalResultMatches}`
@@ -336,11 +363,11 @@ export function LocalApiBrowser() {
               {'\u672c\u5730 API \u8c03\u7528'}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
-              {'\u4ec5\u5728 127.0.0.1 \u8fde\u63a5\u4e0b\u53ef\u7528\uff0c\u4f7f\u7528 listApi \u62c9\u53d6\u5217\u8868\uff0c\u6267\u884c\u65b9\u5f0f\u4e0e api_call.py \u4fdd\u6301\u4e00\u81f4\u3002'}
+              {'\u641c\u7d22\u53ea\u5339\u914d API \u540d\uff08\u70b9\u53f7\u540e\u7684\u90e8\u5206\uff09\u548c\u4e2d\u6587\u63cf\u8ff0\u3002'}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="secondary">{apiItems.length} API</Badge>
+            <Badge variant="secondary">{uniqueApiItems.length} API</Badge>
             <Button variant="outline" size="sm" onClick={() => void loadApis()} disabled={loading}>
               {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {'\u5237\u65b0'}
@@ -357,7 +384,7 @@ export function LocalApiBrowser() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={'\u641c\u7d22 API\u3001\u4e2d\u6587\u63cf\u8ff0\u3001\u53c2\u6570\u540d'}
+                placeholder={'\u641c\u7d22 API \u540d\uff08\u4ec5\u5339\u914d\u70b9\u53f7\u540e\u90e8\u5206\uff09\u6216\u4e2d\u6587\u63cf\u8ff0'}
                 className="h-10 border-border bg-background pl-9 pr-9"
               />
               {search ? (
@@ -372,15 +399,17 @@ export function LocalApiBrowser() {
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
               <span>{'\u53ef\u7528 API \u5217\u8868'}</span>
-              <span>{filteredItems.length} / {apiItems.length}</span>
+              <span>{filteredItems.length} / {uniqueApiItems.length}</span>
             </div>
           </div>
 
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-2 p-3">
+          <div key={normalizedSearch || 'all'} className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="space-y-2">
               {filteredItems.map((item) => {
                 const selected = item.cmd === selectedCmd
                 const paramCount = Object.keys(item.params ?? {}).length
+                const { namespace, shortName } = splitApiCommand(item.cmd)
+
                 return (
                   <button
                     key={item.cmd}
@@ -395,11 +424,16 @@ export function LocalApiBrowser() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-foreground">
-                          {renderHighlightedText(item.cmd, deferredSearch)}
+                        <div className="flex items-center gap-2">
+                          <div className="truncate text-sm font-semibold text-foreground">
+                            {renderHighlightedText(shortName, normalizedSearch)}
+                          </div>
+                          {namespace ? (
+                            <span className="shrink-0 text-[11px] text-muted-foreground">{namespace}</span>
+                          ) : null}
                         </div>
                         <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {renderHighlightedText(item.comment || '\u65e0\u63cf\u8ff0', deferredSearch)}
+                          {renderHighlightedText(item.comment || '\u65e0\u63cf\u8ff0', normalizedSearch)}
                         </div>
                       </div>
                       <Badge variant={selected ? 'default' : 'secondary'} className="shrink-0">
@@ -410,13 +444,13 @@ export function LocalApiBrowser() {
                 )
               })}
 
-              {!loading && filteredItems.length === 0 && (
+              {!loading && filteredItems.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                   {loadError || '\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684 API'}
                 </div>
-              )}
+              ) : null}
             </div>
-          </ScrollArea>
+          </div>
         </section>
 
         <section className="grid min-h-0 gap-4 grid-rows-[auto_minmax(0,1fr)]">
@@ -479,7 +513,7 @@ export function LocalApiBrowser() {
                     : '\u6267\u884c API \u540e\u5728\u8fd9\u91cc\u67e5\u770b\u7ed3\u679c'}
                 </div>
               </div>
-              <div className="relative min-w-[220px] flex-1 sm:max-w-[66%] sm:ml-auto">
+              <div className="relative min-w-[220px] flex-1 sm:ml-auto sm:max-w-[66%]">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={resultSearch}
@@ -522,15 +556,15 @@ export function LocalApiBrowser() {
               </div>
             </div>
 
-            <ScrollArea className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1 overflow-auto">
               <div ref={resultContentRef} className="p-4">
                 <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/35 p-4 text-xs leading-6 text-foreground">
                   {formattedResult
-                    ? highlightResultText(formattedResult, deferredResultSearch)
+                    ? highlightResultText(formattedResult, normalizedResultSearch)
                     : '\u6682\u65e0\u7ed3\u679c'}
                 </pre>
               </div>
-            </ScrollArea>
+            </div>
           </div>
         </section>
       </div>
