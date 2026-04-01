@@ -422,7 +422,7 @@ export function LocalApiBrowser() {
               {'\u672c\u5730 API \u8c03\u7528'}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
-              {'\u641c\u7d22\u53ea\u5339\u914d API \u540d\uff08\u70b9\u53f7\u540e\u7684\u90e8\u5206\uff09\u548c\u4e2d\u6587\u63cf\u8ff0\u3002'}
+              {'\u641c\u7d22\u5339\u914d API \u540d\u548c\u4e2d\u6587\u63cf\u8ff0\u3002'}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -443,7 +443,7 @@ export function LocalApiBrowser() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={'\u641c\u7d22 API \u540d\uff08\u4ec5\u5339\u914d\u70b9\u53f7\u540e\u90e8\u5206\uff09\u6216\u4e2d\u6587\u63cf\u8ff0'}
+                placeholder={'\u641c\u7d22 API \u540d\u6216\u4e2d\u6587\u63cf\u8ff0'}
                 className="h-10 border-border bg-background pl-9 pr-9"
               />
               {search ? (
