@@ -40,6 +40,7 @@ export function LogPanel() {
   const [totalMatches, setTotalMatches] = useState(0)
   const [activeMatchIndex, setActiveMatchIndex] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
+  const shouldScrollToActiveMatchRef = useRef(false)
   const deferredQuery = useDeferredValue(query.trim().toLowerCase())
 
   const filteredLogs = useMemo(() => {
@@ -66,7 +67,11 @@ export function LogPanel() {
       setTotalMatches(hits.length)
       setActiveMatchIndex((current) => {
         if (hits.length === 0) return 0
-        return current >= hits.length ? 0 : current
+        if (current >= hits.length) {
+          shouldScrollToActiveMatchRef.current = true
+          return 0
+        }
+        return current
       })
     })
 
@@ -85,6 +90,8 @@ export function LogPanel() {
       })
 
       if (!hasSearch || hits.length === 0) return
+      if (!shouldScrollToActiveMatchRef.current) return
+      shouldScrollToActiveMatchRef.current = false
       const target = hits[activeMatchIndex] ?? hits[0]
       target?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
     })
@@ -94,6 +101,7 @@ export function LogPanel() {
 
   const jumpToMatch = useCallback((direction: 1 | -1) => {
     if (totalMatches === 0) return
+    shouldScrollToActiveMatchRef.current = true
     setActiveMatchIndex((current) => {
       const next = current + direction
       if (next < 0) return totalMatches - 1
@@ -115,7 +123,10 @@ export function LogPanel() {
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              shouldScrollToActiveMatchRef.current = true
+              setQuery(event.target.value)
+            }}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search logs, messages, payloads"
             className="h-7 pr-7 pl-7 font-mono text-[11px]"
@@ -123,7 +134,10 @@ export function LogPanel() {
           {query && (
             <button
               type="button"
-              onClick={() => setQuery('')}
+              onClick={() => {
+                shouldScrollToActiveMatchRef.current = false
+                setQuery('')
+              }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
               title="Clear search"
             >
@@ -433,6 +447,8 @@ function highlightText(text: string, query: string): ReactNode {
 
   return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)
 }
+
+
 
 
 
