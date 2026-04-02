@@ -289,6 +289,7 @@ export function FlowCanvas() {
 
     try {
       await logoutDeviceSession(activeConnectionId, deviceId)
+      clearSessionStatus(activeConnectionId, deviceId)
       toast.success('Begin session logged out', {
         description: `deviceId: ${deviceId}`,
       })
@@ -299,7 +300,7 @@ export function FlowCanvas() {
     } finally {
       setNodeMenu(null)
     }
-  }, [activeConnectionId, nodeMenu, nodes])
+  }, [activeConnectionId, clearSessionStatus, nodeMenu, nodes])
 
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -578,3 +579,4 @@ export function FlowCanvas() {
     </div>
   )
 }
+

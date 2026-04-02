@@ -1,4 +1,5 @@
-﻿import { useCanvasStore, type BeginNodeData, type CommentNodeData } from '@/stores/canvasStore'
+﻿import { Check, Copy } from 'lucide-react'
+import { useCanvasStore, type BeginNodeData, type CommentNodeData } from '@/stores/canvasStore'
 import { FieldEditor } from './FieldEditor'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSessionStatusStore } from '@/stores/sessionStatusStore'
@@ -19,6 +20,37 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 
+function ReadonlyCopyField({ label, value }: { label: string; value?: string }) {
+  const displayValue = value && value.trim().length > 0 ? value : 'Not available yet'
+
+  return (
+    <div className="grid gap-1.5">
+      <div className="text-xs font-medium text-foreground">{label}</div>
+      <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+        <div className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{displayValue}</div>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          disabled={!value}
+          onClick={async () => {
+            if (!value) return
+            try {
+              await navigator.clipboard.writeText(value)
+              toast.success(`${label} copied`)
+            } catch {
+              toast.error(`Failed to copy ${label}`)
+            }
+          }}
+        >
+          {value ? <Copy className="size-3" /> : <Check className="size-3 opacity-0" />}
+          Copy
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function BeginEditor({ nodeId }: { nodeId: string }) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
@@ -27,9 +59,12 @@ function BeginEditor({ nodeId }: { nodeId: string }) {
 
   if (!node || node.type !== 'beginNode') return null
   const data = node.data as BeginNodeData
+  const deviceId = typeof data.deviceId === 'string' ? data.deviceId.trim() : ''
+  const statusKey = activeConnectionId && deviceId ? `${activeConnectionId}::${deviceId}` : null
+  const sessionRuntime = useSessionStatusStore((s) => (statusKey ? s.statuses[statusKey]?.runtime : undefined))
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-5">
       <div className="grid gap-2">
         <Label htmlFor={`begin-device-${nodeId}`}>deviceId</Label>
         <Input
@@ -48,6 +83,17 @@ function BeginEditor({ nodeId }: { nodeId: string }) {
         <div className="text-xs text-muted-foreground">
           Run will reuse or create a business session based on this deviceId.
         </div>
+      </div>
+
+      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
+        <div>
+          <div className="text-sm font-medium text-foreground">Session Runtime</div>
+          <div className="text-xs text-muted-foreground">
+            After login receives GcPlayerInfo, the current Begin session will show role information here.
+          </div>
+        </div>
+        <ReadonlyCopyField label="roleId" value={sessionRuntime?.roleId} />
+        <ReadonlyCopyField label="allianceId" value={sessionRuntime?.allianceId} />
       </div>
     </div>
   )
@@ -161,5 +207,3 @@ export function PropertySheet() {
     </Sheet>
   )
 }
-
-

@@ -1,4 +1,4 @@
-import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
+﻿import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { Play } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
@@ -90,7 +90,6 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
           </div>
         </div>
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Entry</div>
           <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
           <div className="truncate text-[11px] text-muted-foreground">
             {deviceId || 'Double-click to set deviceId'}
@@ -116,4 +115,3 @@ export function BeginNode({ data, selected }: NodeProps<Node<BeginNodeData>>) {
     </Card>
   )
 }
-

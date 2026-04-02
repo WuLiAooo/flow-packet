@@ -1,7 +1,7 @@
 ﻿import { subscribe } from './ws'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useExecutionStore } from '@/stores/executionStore'
-import { useSessionStatusStore } from '@/stores/sessionStatusStore'
+import { useSessionStatusStore, type SessionRuntimeInfo } from '@/stores/sessionStatusStore'
 
 function appendLog(entry: {
   nodeId: string
@@ -15,6 +15,46 @@ function appendLog(entry: {
     timestamp: Date.now(),
     ...entry,
   })
+}
+
+function shortMessageName(messageName?: string): string {
+  if (!messageName) return ''
+  const parts = messageName.split('.')
+  return parts[parts.length - 1] ?? ''
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function normalizeRuntimeValue(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return String(value)
+  }
+  return undefined
+}
+
+function extractBeginSessionRuntime(messageName?: string, payload?: Record<string, unknown>): SessionRuntimeInfo | null {
+  if (shortMessageName(messageName) !== 'GcPlayerInfo') return null
+
+  const root = asRecord(payload)
+  const playerInfo = asRecord(root?.playerInfo)
+  if (!playerInfo) return null
+
+  const roleId = normalizeRuntimeValue(playerInfo.roleId)
+  const allianceId = normalizeRuntimeValue(playerInfo.allianceId)
+  if (!roleId && !allianceId) return null
+
+  return {
+    ...(roleId ? { roleId } : {}),
+    ...(allianceId ? { allianceId } : {}),
+  }
 }
 
 export function initEventBindings(): () => void {
@@ -102,6 +142,11 @@ export function initEventBindings(): () => void {
         messageName: data.messageName || data.stringRoute || (data.route ? String(data.route) : undefined),
         data: data.data ?? {},
       })
+
+      if (!data.connectionId || !data.deviceId) return
+      const runtime = extractBeginSessionRuntime(data.messageName, data.data)
+      if (!runtime) return
+      useSessionStatusStore.getState().setRuntimeInfo(data.connectionId, data.deviceId, runtime)
     })
   )
 
@@ -212,4 +257,3 @@ export function initEventBindings(): () => void {
     unsubs.forEach((unsub) => unsub())
   }
 }
-
