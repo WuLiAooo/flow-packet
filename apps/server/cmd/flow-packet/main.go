@@ -509,27 +509,39 @@ func configureRunnerForConnState(runner *engine.Runner, cs *api.ConnState) error
 		return mapping.ResponseMsg
 	})
 
-	runner.SetIncomingMessageNameResolver(func(route uint32, stringRoute string) string {
-		if stringRoute != "" {
-			if mapping, ok := cs.RouteMappings[stringRoute]; ok && mapping.ResponseMsg != "" {
+	runner.SetIncomingMessageNameResolver(nil)
+	runner.SetIncomingMessageNamesResolver(nil)
+
+	if cs.ThriftResult != nil {
+		runner.SetIncomingMessageNamesResolver(func(route uint32, stringRoute string) []string {
+			if stringRoute != "" {
+				if mapping, ok := cs.RouteMappings[stringRoute]; ok && mapping.ResponseMsg != "" {
+					return []string{mapping.ResponseMsg}
+				}
+			}
+			if mapping, ok := cs.RouteMappings[fmt.Sprintf("%d", route)]; ok && mapping.ResponseMsg != "" {
+				return []string{mapping.ResponseMsg}
+			}
+			return cs.ThriftResult.FindMessageNamesByID(route)
+		})
+	} else {
+		runner.SetIncomingMessageNameResolver(func(route uint32, stringRoute string) string {
+			if stringRoute != "" {
+				if mapping, ok := cs.RouteMappings[stringRoute]; ok && mapping.ResponseMsg != "" {
+					return mapping.ResponseMsg
+				}
+			}
+			if cs.ParseResult != nil {
+				if messageName := cs.ParseResult.FindMessageNameByID(route); messageName != "" {
+					return messageName
+				}
+			}
+			if mapping, ok := cs.RouteMappings[fmt.Sprintf("%d", route)]; ok {
 				return mapping.ResponseMsg
 			}
-		}
-		if cs.ParseResult != nil {
-			if messageName := cs.ParseResult.FindMessageNameByID(route); messageName != "" {
-				return messageName
-			}
-		}
-		if cs.ThriftResult != nil {
-			if messageName := cs.ThriftResult.FindMessageNameByID(route); messageName != "" {
-				return messageName
-			}
-		}
-		if mapping, ok := cs.RouteMappings[fmt.Sprintf("%d", route)]; ok {
-			return mapping.ResponseMsg
-		}
-		return ""
-	})
+			return ""
+		})
+	}
 
 	return nil
 }

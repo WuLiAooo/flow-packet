@@ -54,6 +54,8 @@ type StringRouteResponseNameResolver func(route string) string
 
 type IncomingMessageNameResolver func(route uint32, stringRoute string) string
 
+type IncomingMessageNamesResolver func(route uint32, stringRoute string) []string
+
 type executionPlan struct {
 	order                  []string
 	observerWaitsByRequest map[string][]string
@@ -71,10 +73,11 @@ type Runner struct {
 	sendFn                 func(data []byte) error
 	encoder                MessageEncoder
 	decoder                MessageDecoder
-	responseResolver       ResponseNameResolver
-	stringResponseResolver StringRouteResponseNameResolver
-	incomingNameResolver   IncomingMessageNameResolver
-	inboxMu                sync.Mutex
+	responseResolver        ResponseNameResolver
+	stringResponseResolver  StringRouteResponseNameResolver
+	incomingNameResolver    IncomingMessageNameResolver
+	incomingNamesResolver   IncomingMessageNamesResolver
+	inboxMu                 sync.Mutex
 	inbox                  []*codec.Packet
 	inboxSignal            chan struct{}
 	observerMu             sync.Mutex
@@ -134,6 +137,10 @@ func (r *Runner) SetStringRouteResponseNameResolver(resolver StringRouteResponse
 
 func (r *Runner) SetIncomingMessageNameResolver(resolver IncomingMessageNameResolver) {
 	r.incomingNameResolver = resolver
+}
+
+func (r *Runner) SetIncomingMessageNamesResolver(resolver IncomingMessageNamesResolver) {
+	r.incomingNamesResolver = resolver
 }
 
 func (r *Runner) SetTimeout(d time.Duration) {
@@ -585,12 +592,17 @@ func (r *Runner) executeRequestNode(ctx context.Context, node *FlowNode, waitFor
 		return result
 	}
 
-	responseName := r.resolveExpectedResponseName(node.Route, node.StringRoute)
-	if responseName != "" {
-		result.ResponseMsg = responseName
+	responseNames := r.resolveIncomingMessageNames(node.Route, node.StringRoute)
+	if len(responseNames) == 0 {
+		if responseName := r.resolveExpectedResponseName(node.Route, node.StringRoute); responseName != "" {
+			responseNames = []string{responseName}
+		}
+	}
+	if len(responseNames) > 0 {
+		result.ResponseMsg = responseNames[0]
 	}
 
-	response, err := r.decoder(responseName, respData)
+	responseName, response, err := r.decodeIncomingCandidates(respData, responseNames)
 	if err != nil {
 		result.Error = fmt.Sprintf("decode response: %v", err)
 		result.Duration = time.Since(start).Milliseconds()
@@ -598,6 +610,7 @@ func (r *Runner) executeRequestNode(ctx context.Context, node *FlowNode, waitFor
 	}
 
 	result.Success = true
+	result.ResponseMsg = responseName
 	result.Response = response
 	result.Duration = time.Since(start).Milliseconds()
 	return result
@@ -670,6 +683,34 @@ func (r *Runner) takeMatchingPacket(node *FlowNode) *codec.Packet {
 	return nil
 }
 
+func (r *Runner) waitNodeMessageNames(node *FlowNode, pkt *codec.Packet) []string {
+	if node == nil {
+		return nil
+	}
+	if pkt != nil {
+		resolved := r.resolveIncomingMessageNames(pkt.Route, pkt.StringRoute)
+		if len(resolved) > 0 {
+			return resolved
+		}
+	}
+	if node.MessageName == "" {
+		return nil
+	}
+	return []string{node.MessageName}
+}
+
+func (r *Runner) waitNodeMatchesMessage(node *FlowNode, pkt *codec.Packet) bool {
+	if node == nil || node.MessageName == "" {
+		return true
+	}
+	for _, messageName := range r.waitNodeMessageNames(node, pkt) {
+		if messageName == node.MessageName {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runner) matchesWaitNode(node *FlowNode, pkt *codec.Packet) bool {
 	if pkt == nil {
 		return false
@@ -690,7 +731,7 @@ func (r *Runner) matchesWaitNode(node *FlowNode, pkt *codec.Packet) bool {
 	}
 	if node.MessageName != "" {
 		hasMatcher = true
-		if r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute) != node.MessageName {
+		if !r.waitNodeMatchesMessage(node, pkt) {
 			return false
 		}
 	}
@@ -711,10 +752,72 @@ func (r *Runner) resolveExpectedResponseName(route uint32, stringRoute string) s
 }
 
 func (r *Runner) resolveIncomingMessageName(route uint32, stringRoute string) string {
-	if r.incomingNameResolver == nil {
+	names := r.resolveIncomingMessageNames(route, stringRoute)
+	if len(names) == 0 {
 		return ""
 	}
-	return r.incomingNameResolver(route, stringRoute)
+	return names[0]
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func (r *Runner) resolveIncomingMessageNames(route uint32, stringRoute string) []string {
+	var names []string
+	if r.incomingNamesResolver != nil {
+		names = append(names, r.incomingNamesResolver(route, stringRoute)...)
+	}
+	if len(names) == 0 && r.incomingNameResolver != nil {
+		if name := r.incomingNameResolver(route, stringRoute); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		if name := r.resolveExpectedResponseName(route, stringRoute); name != "" {
+			names = append(names, name)
+		}
+	}
+	return uniqueNonEmptyStrings(names)
+}
+
+func (r *Runner) decodeIncomingCandidates(data []byte, messageNames []string) (string, map[string]any, error) {
+	if len(messageNames) == 0 {
+		return "", nil, fmt.Errorf("response message name is empty")
+	}
+
+	var decodeErrs []string
+	for _, messageName := range uniqueNonEmptyStrings(messageNames) {
+		payload, err := r.decoder(messageName, data)
+		if err != nil {
+			decodeErrs = append(decodeErrs, fmt.Sprintf("%s: %v", messageName, err))
+			continue
+		}
+		return messageName, payload, nil
+	}
+
+	if len(decodeErrs) == 0 {
+		return "", nil, fmt.Errorf("response message name is empty")
+	}
+	return "", nil, fmt.Errorf("decode candidates [%s] failed: %s", strings.Join(messageNames, ", "), strings.Join(decodeErrs, "; "))
 }
 
 func (r *Runner) DecodeIncomingPacket(pkt *codec.Packet) (string, map[string]any, error) {
@@ -725,17 +828,13 @@ func (r *Runner) DecodeIncomingPacket(pkt *codec.Packet) (string, map[string]any
 		return "", nil, fmt.Errorf("message decoder not configured")
 	}
 
-	messageName := r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute)
-	if messageName == "" {
-		messageName = r.resolveExpectedResponseName(pkt.Route, pkt.StringRoute)
-	}
-	if messageName == "" {
-		return "", nil, fmt.Errorf("response message name is empty")
-	}
-
-	payload, err := r.decoder(messageName, pkt.Data)
+	messageNames := r.resolveIncomingMessageNames(pkt.Route, pkt.StringRoute)
+	messageName, payload, err := r.decodeIncomingCandidates(pkt.Data, messageNames)
 	if err != nil {
-		return messageName, nil, err
+		if len(messageNames) > 0 {
+			return messageNames[0], nil, err
+		}
+		return "", nil, err
 	}
 	return messageName, payload, nil
 }
@@ -799,23 +898,20 @@ func (r *Runner) decodeWaitPacket(node *FlowNode, pkt *codec.Packet, start time.
 		return result
 	}
 
-	responseName := r.resolveIncomingMessageName(pkt.Route, pkt.StringRoute)
-	if responseName == "" {
-		responseName = node.MessageName
-	}
-	if responseName == "" {
+	responseNames := r.waitNodeMessageNames(node, pkt)
+	if len(responseNames) == 0 {
 		result.Error = "response message name is empty"
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
-	result.ResponseMsg = responseName
 
-	response, err := r.decoder(responseName, pkt.Data)
+	responseName, response, err := r.decodeIncomingCandidates(pkt.Data, responseNames)
 	if err != nil {
 		result.Error = fmt.Sprintf("decode response: %v", err)
 		result.Duration = time.Since(start).Milliseconds()
 		return result
 	}
+	result.ResponseMsg = responseName
 
 	result.Success = true
 	result.Response = response

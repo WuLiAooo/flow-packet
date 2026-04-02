@@ -353,25 +353,103 @@ func TestResolveOrderAllowsObserverWaitNodes(t *testing.T) {
 	}
 }
 
-func TestRunnerObserverWaitReceivesLatePacket(t *testing.T) {
+
+func TestRunnerDecodeIncomingPacketFallsBackToLaterCandidate(t *testing.T) {
+	runner := NewRunner(defaultPacketConfig())
+	runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
+		if messageName == "game.GcRight" {
+			return map[string]any{"message": messageName, "body": string(data)}, nil
+		}
+		return nil, context.DeadlineExceeded
+	})
+	runner.SetIncomingMessageNamesResolver(func(route uint32, stringRoute string) []string {
+		if route == 2001 {
+			return []string{"game.GcWrong", "game.GcRight"}
+		}
+		return nil
+	})
+
+	messageName, payload, err := runner.DecodeIncomingPacket(&codec.Packet{Route: 2001, Data: []byte("ok")})
+	if err != nil {
+		t.Fatalf("DecodeIncomingPacket error: %v", err)
+	}
+	if messageName != "game.GcRight" {
+		t.Fatalf("messageName = %q, want %q", messageName, "game.GcRight")
+	}
+	if payload["body"] != "ok" {
+		t.Fatalf("payload body = %#v, want ok", payload["body"])
+	}
+}
+
+func TestRunnerWaitNodeMatchesNonFirstCandidateMessageName(t *testing.T) {
 	runner := NewRunner(defaultPacketConfig())
 	runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
 		return []byte(messageName), nil
 	})
 	runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
-		return map[string]any{
-			"message": messageName,
-			"body":    string(data),
-		}, nil
+		if messageName != "game.GcLogin" {
+			return nil, context.DeadlineExceeded
+		}
+		return map[string]any{"message": messageName, "body": string(data)}, nil
 	})
-	runner.SetIncomingMessageNameResolver(func(route uint32, stringRoute string) string {
+	runner.SetIncomingMessageNamesResolver(func(route uint32, stringRoute string) []string {
+		if route == 2001 {
+			return []string{"game.GcWrong", "game.GcLogin"}
+		}
+		return nil
+	})
+	runner.SetSendFunc(func(data []byte) error {
+		runner.PushIncomingPacket(&codec.Packet{Route: 2001, Data: []byte("ok")})
+		return nil
+	})
+
+	nodes := []FlowNode{
+		{ID: "cg", Type: FlowNodeTypeRequest, MessageName: "game.CgLogin", Route: 1001},
+		{ID: "gc", Type: FlowNodeTypeWaitResponse, MessageName: "game.GcLogin", Route: 2001},
+	}
+	edges := []FlowEdge{{Source: "cg", Target: "gc"}}
+
+	var results []NodeResult
+	err := runner.Execute(context.Background(), nodes, edges, func(result NodeResult) {
+		results = append(results, result)
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results len = %d, want 2", len(results))
+	}
+	if !results[1].Success {
+		t.Fatalf("wait result = %+v", results[1])
+	}
+	if results[1].ResponseMsg != "game.GcLogin" {
+		t.Fatalf("response msg = %q, want %q", results[1].ResponseMsg, "game.GcLogin")
+	}
+}
+
+func TestRunnerObserverWaitMatchesNonFirstCandidateMessageName(t *testing.T) {
+	runner := NewRunner(defaultPacketConfig())
+	runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
+		return []byte(messageName), nil
+	})
+	runner.SetMessageDecoder(func(messageName string, data []byte) (map[string]any, error) {
+		switch messageName {
+		case "game.GcLogin", "game.GcNotice", "game.GcDone":
+			return map[string]any{"message": messageName, "body": string(data)}, nil
+		default:
+			return nil, context.DeadlineExceeded
+		}
+	})
+	runner.SetIncomingMessageNamesResolver(func(route uint32, stringRoute string) []string {
 		switch route {
 		case 2001:
-			return "game.GcLogin"
+			return []string{"game.GcWrong", "game.GcLogin"}
 		case 2002:
-			return "game.GcNotice"
+			return []string{"game.GcOther", "game.GcNotice"}
+		case 1002:
+			return []string{"game.GcDone"}
 		default:
-			return ""
+			return nil
 		}
 	})
 	callCount := 0
@@ -431,16 +509,13 @@ func TestRunnerObserverWaitReceivesLatePacket(t *testing.T) {
 		}
 	}
 
-	if !results["cg1"].Success {
-		t.Fatalf("cg1 result = %+v", results["cg1"])
-	}
-	if !results["gc_main"].Success || results["gc_main"].Response["body"] != "main" {
+	if !results["gc_main"].Success || results["gc_main"].ResponseMsg != "game.GcLogin" {
 		t.Fatalf("gc_main result = %+v", results["gc_main"])
 	}
-	if !results["gc_observe"].Success || results["gc_observe"].Response["body"] != "observe" {
+	if !results["gc_observe"].Success || results["gc_observe"].ResponseMsg != "game.GcNotice" {
 		t.Fatalf("gc_observe result = %+v", results["gc_observe"])
 	}
-	if !results["cg2"].Success || results["cg2"].Response["body"] != "done" {
+	if !results["cg2"].Success || results["cg2"].ResponseMsg != "game.GcDone" {
 		t.Fatalf("cg2 result = %+v", results["cg2"])
 	}
 }
