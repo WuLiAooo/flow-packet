@@ -427,6 +427,22 @@ func TestRunnerWaitNodeMatchesNonFirstCandidateMessageName(t *testing.T) {
 	}
 }
 
+func collectNodeResults(t *testing.T, count int, resultsCh <-chan NodeResult) map[string]NodeResult {
+	t.Helper()
+
+	deadline := time.After(100 * time.Millisecond)
+	results := make(map[string]NodeResult, count)
+	for len(results) < count {
+		select {
+		case result := <-resultsCh:
+			results[result.NodeID] = result
+		case <-deadline:
+			t.Fatalf("timed out waiting for node results, got %d", len(results))
+		}
+	}
+	return results
+}
+
 func TestRunnerObserverWaitMatchesNonFirstCandidateMessageName(t *testing.T) {
 	runner := NewRunner(defaultPacketConfig())
 	runner.SetMessageEncoder(func(messageName string, fields map[string]any) ([]byte, error) {
@@ -498,16 +514,7 @@ func TestRunnerObserverWaitMatchesNonFirstCandidateMessageName(t *testing.T) {
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	deadline := time.After(300 * time.Millisecond)
-	results := make(map[string]NodeResult)
-	for len(results) < 4 {
-		select {
-		case result := <-resultsCh:
-			results[result.NodeID] = result
-		case <-deadline:
-			t.Fatalf("timed out waiting for observer results, got %d", len(results))
-		}
-	}
+	results := collectNodeResults(t, 4, resultsCh)
 
 	if !results["gc_main"].Success || results["gc_main"].ResponseMsg != "game.GcLogin" {
 		t.Fatalf("gc_main result = %+v", results["gc_main"])
