@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   useCallback,
   useDeferredValue,
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { LOCAL_API_LIST_LOAD_ERROR_TOAST_ID, getLocalApiListLoadErrorMessage } from './localApiErrorMessage.js'
 
 const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors'
 const resultActiveHighlightClassName = 'bg-amber-400 ring-1 ring-amber-700'
@@ -242,9 +243,12 @@ export function LocalApiBrowser() {
         return uniqueItems[0]?.cmd ?? ''
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = getLocalApiListLoadErrorMessage(error instanceof Error ? error.message : String(error))
       setLoadError(message)
-      toast.error('\u52a0\u8f7d API \u5217\u8868\u5931\u8d25', { description: message })
+      toast.error('\u52a0\u8f7d API \u5217\u8868\u5931\u8d25', {
+        id: LOCAL_API_LIST_LOAD_ERROR_TOAST_ID,
+        description: message,
+      })
     } finally {
       setLoading(false)
     }
@@ -661,3 +665,9 @@ export function LocalApiBrowser() {
     </div>
   )
 }
+
+
+
+
+
+
