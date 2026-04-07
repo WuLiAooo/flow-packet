@@ -10,6 +10,7 @@ import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { runFlowFromBegin } from '@/lib/runFlowFromBegin'
 import { toast } from 'sonner'
+import { getConnectFailureToastOptions } from '@/components/connection/connectionToastContent.js'
 
 const stateColors: Record<string, string> = {
   disconnected: 'hsl(var(--muted-foreground))',
@@ -68,9 +69,7 @@ export function Toolbar({ onBack }: ToolbarProps) {
         description: `Connected to ${connection.host}:${connection.port}`,
       })
     } catch (err) {
-      toast.error('Reconnect failed', {
-        description: err instanceof Error ? err.message : String(err),
-      })
+      toast.error('Reconnect failed', getConnectFailureToastOptions(err instanceof Error ? err.message : String(err)))
     }
   }
 
@@ -136,3 +135,4 @@ export function Toolbar({ onBack }: ToolbarProps) {
     </div>
   )
 }
+

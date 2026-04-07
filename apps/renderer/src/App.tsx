@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+﻿import { useEffect, useState, useCallback } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Toaster } from '@/components/ui/sonner'
@@ -19,6 +19,7 @@ import { connect as wsConnect, setConnectionStatusCallback } from '@/services/ws
 import { connectTCP, getProtoList, getRouteList } from '@/services/api'
 import { createRequestNode, createWaitResponseNode, parseDraggedProtocolMessage } from '@/lib/protocolNodes'
 import { toast } from 'sonner'
+import { getConnectFailureToastOptions } from '@/components/connection/connectionToastContent.js'
 import { useTabStore } from '@/stores/tabStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useProtoStore } from '@/stores/protoStore'
@@ -206,9 +207,7 @@ function App() {
       })
     }).catch((err) => {
       useConnectionStore.getState().setState('disconnected')
-      toast.error('Connection failed', {
-        description: err instanceof Error ? err.message : String(err),
-      })
+      toast.error('Connection failed', getConnectFailureToastOptions(err instanceof Error ? err.message : String(err)))
     })
   }, [setActiveConnectionId, setConfig, setFiles, setMessages, setRouteFields, setRouteMappings, setTargetAddr])
 
@@ -296,3 +295,4 @@ function App() {
 }
 
 export default App
+
