@@ -31,6 +31,10 @@ export function buildConfigTableStats(document, visibleColumnCount, isDirty) {
   ]
 }
 
+export function getConfigRowIDValue(row) {
+  return String(row?.id ?? '')
+}
+
 export function normalizeConfigFileSearchText(value) {
   return value.normalize('NFKC').toLocaleLowerCase().trim()
 }

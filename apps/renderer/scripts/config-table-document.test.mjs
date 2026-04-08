@@ -7,6 +7,7 @@ import {
   createDocumentSnapshot,
   decidePendingNavigation,
   filterConfigFiles,
+  getConfigRowIDValue,
   hasDocumentChanges,
 } from '../src/components/config-table/configTableDocument.js'
 
@@ -65,6 +66,10 @@ test('filterConfigFiles splits xml and xlsx lists and matches compact search tex
     filterConfigFiles(files, 'xlsx', 'active_rules').map((file) => file.id),
     ['3']
   )
+})
+
+test('getConfigRowIDValue returns the row id for the sticky first column', () => {
+  assert.equal(getConfigRowIDValue({ id: '1001', name: 'boss' }), '1001')
 })
 
 test('config table tab id is stable for both entry points', () => {

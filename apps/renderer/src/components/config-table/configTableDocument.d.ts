@@ -36,6 +36,7 @@ export function buildConfigTableStats(
   visibleColumnCount: number,
   isDirty: boolean,
 ): ConfigTableStatItem[]
+export function getConfigRowIDValue(row: Record<string, string> | null | undefined): string
 export function normalizeConfigFileSearchText(value: string): string
 export function compactConfigFileSearchText(value: string): string
 export function filterConfigFiles(

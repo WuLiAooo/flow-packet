@@ -40,7 +40,6 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -63,6 +62,7 @@ import {
   createDocumentSnapshot,
   decidePendingNavigation,
   filterConfigFiles,
+  getConfigRowIDValue,
   hasDocumentChanges,
   type PendingNavigationTarget,
 } from './configTableDocument.js'
@@ -123,6 +123,11 @@ export function ConfigTablePage() {
   const visibleColumns = useMemo(
     () => buildVisibleColumns(document?.columns ?? [], hiddenColumns),
     [document, hiddenColumns]
+  )
+  const showStickyIDColumn = visibleColumns.includes('id')
+  const dataColumns = useMemo(
+    () => (showStickyIDColumn ? visibleColumns.filter((column) => column !== 'id') : visibleColumns),
+    [showStickyIDColumn, visibleColumns]
   )
 
   const selectedFile = useMemo(
@@ -560,13 +565,13 @@ export function ConfigTablePage() {
             </div>
           </div>
 
-          <div className="min-h-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+          <div className="min-h-0 flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm">
             <div className="border-b border-border px-5 py-3">
               <div className="text-sm font-semibold text-foreground">表格数据</div>
               <div className="mt-1 text-xs text-muted-foreground">仅支持修改已有单元格的值，不支持新增或删除行列。</div>
             </div>
 
-            <div className="min-h-0 h-[calc(100%-61px)]">
+            <div className="min-h-0 flex-1">
               {openingDocument ? (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   <Loader2 className="mr-2 size-4 animate-spin" />
@@ -581,24 +586,35 @@ export function ConfigTablePage() {
                   当前所有列都被隐藏了，请在“列显示”里至少勾选一列。
                 </div>
               ) : (
-                <ScrollArea className="h-full">
+                <div className="h-full overflow-auto">
                   <div className="min-w-max p-4">
-                    <Table>
+                    <table className="min-w-full w-max caption-bottom text-sm">
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="sticky left-0 z-20 bg-background text-center">#</TableHead>
-                          {visibleColumns.map((column) => (
-                            <TableHead key={column} className="min-w-40 bg-background">{column}</TableHead>
+                          {showStickyIDColumn ? (
+                            <TableHead className="sticky top-0 left-0 z-50 w-24 min-w-24 border-r border-border bg-background/95 text-center shadow-[10px_0_18px_-12px_rgba(15,23,42,0.42),0_10px_18px_-14px_rgba(15,23,42,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                              id
+                            </TableHead>
+                          ) : null}
+                          {dataColumns.map((column) => (
+                            <TableHead
+                              key={column}
+                              className="sticky top-0 z-30 min-w-40 bg-background/95 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.48)] backdrop-blur supports-[backdrop-filter]:bg-background/85"
+                            >
+                              {column}
+                            </TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {document.rows.length > 0 ? document.rows.map((row, rowIndex) => (
                           <TableRow key={`${document.filePath}-${document.sheetName ?? 'xml'}-${rowIndex}`}>
-                            <TableCell className="sticky left-0 z-10 bg-background text-center text-xs text-muted-foreground">
-                              {rowIndex + 1}
-                            </TableCell>
-                            {visibleColumns.map((column) => (
+                            {showStickyIDColumn ? (
+                              <TableCell className="sticky left-0 z-20 w-24 min-w-24 border-r border-border bg-background/98 text-center text-xs font-medium text-foreground shadow-[10px_0_18px_-12px_rgba(15,23,42,0.34)]">
+                                {getConfigRowIDValue(row)}
+                              </TableCell>
+                            ) : null}
+                            {dataColumns.map((column) => (
                               <TableCell key={`${rowIndex}-${column}`} className="min-w-40">
                                 <Input
                                   value={row[column] ?? ''}
@@ -610,15 +626,18 @@ export function ConfigTablePage() {
                           </TableRow>
                         )) : (
                           <TableRow>
-                            <TableCell colSpan={visibleColumns.length + 1} className="py-8 text-center text-sm text-muted-foreground">
+                            <TableCell
+                              colSpan={dataColumns.length + (showStickyIDColumn ? 1 : 0)}
+                              className="py-8 text-center text-sm text-muted-foreground"
+                            >
                               当前文件没有可展示的数据。
                             </TableCell>
                           </TableRow>
                         )}
                       </TableBody>
-                    </Table>
+                    </table>
                   </div>
-                </ScrollArea>
+                </div>
               )}
             </div>
           </div>
@@ -671,3 +690,4 @@ export function ConfigTablePage() {
     </>
   )
 }
+
