@@ -1,4 +1,4 @@
-import { CodeXml, Library, LayoutDashboard } from 'lucide-react'
+﻿import { CodeXml, Library, LayoutDashboard, TableProperties } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -6,7 +6,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-export type SidebarTab = 'canvas' | 'collection' | 'api'
+export type SidebarTab = 'canvas' | 'collection' | 'api' | 'config'
 
 type NavItem = {
   icon: typeof LayoutDashboard
@@ -15,27 +15,39 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
-  { icon: LayoutDashboard, value: 'canvas', label: '\u753b\u5e03' },
-  { icon: Library, value: 'collection', label: '\u96c6\u5408' },
+  { icon: LayoutDashboard, value: 'canvas', label: '画布' },
+  { icon: Library, value: 'collection', label: '集合' },
   { icon: CodeXml, value: 'api', label: 'API' },
+  { icon: TableProperties, value: 'config', label: '配置表' },
 ]
 
 export const SIDEBAR_TABS = {
   canvas: 'canvas' as SidebarTab,
   collection: 'collection' as SidebarTab,
   api: 'api' as SidebarTab,
+  config: 'config' as SidebarTab,
 } as const
 
 export function AppSidebar({
   activeTab,
   onTabChange,
   showApiTab = true,
+  showConfigTab = true,
 }: {
   activeTab: SidebarTab
   onTabChange: (tab: SidebarTab) => void
   showApiTab?: boolean
+  showConfigTab?: boolean
 }) {
-  const visibleItems = showApiTab ? navItems : navItems.filter((item) => item.value !== SIDEBAR_TABS.api)
+  const visibleItems = navItems.filter((item) => {
+    if (item.value === SIDEBAR_TABS.api && !showApiTab) {
+      return false
+    }
+    if (item.value === SIDEBAR_TABS.config && !showConfigTab) {
+      return false
+    }
+    return true
+  })
 
   return (
     <TooltipProvider delayDuration={0}>

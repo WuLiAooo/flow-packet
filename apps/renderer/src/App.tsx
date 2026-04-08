@@ -1,15 +1,19 @@
 ﻿import { useEffect, useState, useCallback } from 'react'
+import { ArrowLeft, TableProperties } from 'lucide-react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { AppSidebar, SIDEBAR_TABS, type SidebarTab } from '@/components/layout/AppSidebar'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { CanvasTabs } from '@/components/layout/CanvasTabs'
 import { Toolbar } from '@/components/layout/Toolbar'
 import { TitleBar } from '@/components/layout/TitleBar'
+import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { ProtoBrowser } from '@/components/proto/ProtoBrowser'
 import { CollectionBrowser } from '@/components/collection/CollectionBrowser'
 import { LocalApiBrowser } from '@/components/collection/LocalApiBrowser'
+import { ConfigTablePage } from '@/components/config-table/ConfigTablePage'
 import { FlowCanvas } from '@/components/canvas/FlowCanvas'
 import { PropertySheet } from '@/components/editor/PropertySheet'
 import { LogPanel } from '@/components/execution/LogPanel'
@@ -63,6 +67,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>(SIDEBAR_TABS.canvas)
+  const [standaloneConfigOpen, setStandaloneConfigOpen] = useState(false)
   const activeConnectionId = useConnectionStore((s) => s.activeConnectionId)
   const currentHost = useConnectionStore((s) => s.config.host)
   const setActiveConnectionId = useConnectionStore((s) => s.setActiveConnectionId)
@@ -143,14 +148,20 @@ function App() {
   }, [activeConnectionId])
 
   const showApiTab = canUseApiTab(currentHost)
+  const showConfigTab = Boolean(activeConnectionId)
 
   useEffect(() => {
     if (!showApiTab && activeTab === SIDEBAR_TABS.api) {
       setActiveTab(SIDEBAR_TABS.canvas)
+      return
     }
-  }, [activeTab, showApiTab])
+    if (!showConfigTab && activeTab === SIDEBAR_TABS.config) {
+      setActiveTab(SIDEBAR_TABS.canvas)
+    }
+  }, [activeTab, showApiTab, showConfigTab])
 
   const handleEnterConnection = useCallback((connection: SavedConnection) => {
+    setStandaloneConfigOpen(false)
     useConnectionStore.getState().setState('disconnected')
     useSessionStatusStore.getState().clearConnection(connection.id)
 
@@ -219,6 +230,7 @@ function App() {
     setMessages([])
     setRouteMappings([])
     setActiveConnectionId(null)
+    setStandaloneConfigOpen(false)
     useCollectionStore.getState().clearCollections()
     useSessionStatusStore.getState().clearAll()
   }, [activeConnectionId, setActiveConnectionId, setFiles, setMessages, setRouteMappings])
@@ -228,9 +240,34 @@ function App() {
       <>
         <div className="flex h-svh w-full flex-col">
           <TitleBar />
-          <div className="flex min-h-0 flex-1">
-            <WelcomePage onEnterConnection={handleEnterConnection} />
-          </div>
+          {standaloneConfigOpen ? (
+            <>
+              <div className="h-10 shrink-0 border-b border-border px-3" style={{ background: 'var(--bg-toolbar)' }}>
+                <div className="flex h-full items-center gap-2">
+                  <Button variant="ghost" size="icon-sm" onClick={() => setStandaloneConfigOpen(false)}>
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <TableProperties className="size-4 text-primary" />
+                    配置表
+                  </div>
+                  <div className="ml-auto">
+                    <ThemeToggle />
+                  </div>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1">
+                <ConfigTablePage />
+              </div>
+            </>
+          ) : (
+            <div className="flex min-h-0 flex-1">
+              <WelcomePage
+                onEnterConnection={handleEnterConnection}
+                onEnterConfigTable={() => setStandaloneConfigOpen(true)}
+              />
+            </div>
+          )}
         </div>
         <Toaster position="top-center" richColors />
       </>
@@ -238,6 +275,8 @@ function App() {
   }
 
   const isApiTab = showApiTab && activeTab === SIDEBAR_TABS.api
+  const isConfigTab = showConfigTab && activeTab === SIDEBAR_TABS.config
+  const showCanvasWorkspace = !isApiTab && !isConfigTab
 
   return (
     <ReactFlowProvider>
@@ -251,20 +290,27 @@ function App() {
           </div>
 
           <div className="flex min-h-0 flex-1">
-            <AppSidebar activeTab={activeTab} onTabChange={setActiveTab} showApiTab={showApiTab} />
+            <AppSidebar
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              showApiTab={showApiTab}
+              showConfigTab={showConfigTab}
+            />
             <div className="min-w-0 flex-1">
               <MainLayout
-                left={
+                left={isConfigTab ? <div /> : (
                   <div className="flex h-full flex-col overflow-hidden">
                     <div className="min-h-0 flex-1 overflow-hidden">
                       {activeTab === SIDEBAR_TABS.collection ? <CollectionBrowser /> : <ProtoBrowser />}
                     </div>
                   </div>
-                }
-                tabs={isApiTab ? undefined : <CanvasTabs />}
+                )}
+                tabs={showCanvasWorkspace ? <CanvasTabs /> : undefined}
                 center={
                   isApiTab ? (
                     <LocalApiBrowser />
+                  ) : isConfigTab ? (
+                    <ConfigTablePage />
                   ) : activeTabId ? (
                     <FlowCanvas />
                   ) : (
@@ -280,9 +326,9 @@ function App() {
                     </div>
                   )
                 }
-                bottom={isApiTab ? undefined : <LogPanel />}
-                showController={!isApiTab}
-                showBottom={!isApiTab}
+                bottom={showCanvasWorkspace ? <LogPanel /> : undefined}
+                showController={showCanvasWorkspace}
+                showBottom={showCanvasWorkspace}
               />
             </div>
           </div>
@@ -295,4 +341,3 @@ function App() {
 }
 
 export default App
-

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import {
   Plug,
@@ -7,6 +7,7 @@ import {
   Trash2,
   GripVertical,
   Zap,
+  TableProperties,
 } from 'lucide-react'
 import {
   DndContext,
@@ -69,6 +70,7 @@ import { CreateConnectionDialog } from './CreateConnectionDialog'
 
 interface WelcomePageProps {
   onEnterConnection: (connection: SavedConnection) => void
+  onEnterConfigTable?: () => void
 }
 
 const tagColors: Record<string, string> = {
@@ -176,7 +178,7 @@ function SortableRow({
   )
 }
 
-export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
+export function WelcomePage({ onEnterConnection, onEnterConfigTable }: WelcomePageProps) {
   const connections = useSavedConnectionStore((s) => s.connections)
   const deleteConnection = useSavedConnectionStore((s) => s.deleteConnection)
   const reorderConnections = useSavedConnectionStore((s) => s.reorderConnections)
@@ -277,6 +279,17 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
                     <span>快速添加</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                {onEnterConfigTable ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      className="min-w-8 border border-border bg-background text-foreground duration-200 ease-linear hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => onEnterConfigTable()}
+                    >
+                      <TableProperties className="size-4" />
+                      <span>配置表</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -284,7 +297,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
       </Sidebar>
 
       <SidebarInset className="relative overflow-hidden">
-        {/* Squares 动画背景 */}
+        {/* Squares 鍔ㄧ敾鑳屾櫙 */}
         <Squares
           className="absolute inset-0 w-full h-full z-10"
           direction="diagonal"
@@ -302,7 +315,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
               orientation="vertical"
               className="mx-1 data-[orientation=vertical]:h-4"
             />
-            <h1 className="text-base font-medium">连接管理</h1>
+            <h1 className="text-base font-medium">杩炴帴绠＄悊</h1>
 
             <div className="ml-auto flex items-center gap-2">
               <div className="relative">
@@ -310,7 +323,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="搜索连接..."
+                  placeholder="鎼滅储杩炴帴..."
                   className="h-8 w-[200px] pl-8 text-sm"
                 />
               </div>
@@ -326,7 +339,7 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
             <div className="flex flex-col items-center justify-center h-full">
               <img src="./remind.png" alt="remind" className="size-32 -mb-9 object-contain" />
               <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight text-muted-foreground">
-                暂无连接，点击"创建连接"开始
+                暂无连接，点击“快速添加”开始
               </h3>
             </div>
           ) : filteredConnections.length === 0 ? (
@@ -377,19 +390,21 @@ export function WelcomePage({ onEnterConnection }: WelcomePageProps) {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogTitle>纭鍒犻櫎</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除连接 "{deleteTarget?.name}" 吗？此操作不可撤销。
+              纭畾瑕佸垹闄よ繛鎺?"{deleteTarget?.name}" 鍚楋紵姝ゆ搷浣滀笉鍙挙閿€銆?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>删除</AlertDialogAction>
+            <AlertDialogCancel>鍙栨秷</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>鍒犻櫎</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </SidebarProvider>
   )
 }
+
+
 
 

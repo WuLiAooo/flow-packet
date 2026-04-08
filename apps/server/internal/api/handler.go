@@ -387,6 +387,10 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("collection.move", makeCollectionMoveHandler(state))
 	srv.Handle("gameapi.list", makeGameAPIListHandler())
 	srv.Handle("gameapi.execute", makeGameAPIExecuteHandler())
+	srv.Handle("configRoot.scan", makeConfigRootScanHandler())
+	srv.Handle("configGroup.files", makeConfigGroupFilesHandler())
+	srv.Handle("configDocument.open", makeConfigDocumentOpenHandler())
+	srv.Handle("configDocument.save", makeConfigDocumentSaveHandler())
 }
 func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
