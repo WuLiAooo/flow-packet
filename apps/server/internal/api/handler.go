@@ -390,6 +390,7 @@ func RegisterHandlers(srv *Server, state *AppState) {
 	srv.Handle("configRoot.scan", makeConfigRootScanHandler())
 	srv.Handle("configGroup.files", makeConfigGroupFilesHandler())
 	srv.Handle("configDocument.open", makeConfigDocumentOpenHandler())
+	srv.Handle("configDocument.rows", makeConfigDocumentRowsHandler())
 	srv.Handle("configDocument.save", makeConfigDocumentSaveHandler())
 }
 func makeProtoUploadHandler(state *AppState, srv *Server) http.HandlerFunc {
@@ -1622,3 +1623,4 @@ func extractMissingImports(errMsg string) []string {
 	}
 	return result
 }
+

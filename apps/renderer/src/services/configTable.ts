@@ -1,4 +1,4 @@
-﻿import { sendRequest } from './ws'
+import { sendRequest } from './ws'
 
 export interface ConfigGroupSummary {
   groupKey: string
@@ -15,6 +15,17 @@ export interface ConfigFileEntry {
   filePath: string
 }
 
+export interface ConfigTableSearch {
+  column?: string
+  value?: string
+  exact?: boolean
+}
+
+export interface ConfigTableRow {
+  rowIndex: number
+  values: Record<string, string>
+}
+
 export interface ConfigTableDocument {
   sourceType: 'xml' | 'xlsx'
   filePath: string
@@ -22,7 +33,33 @@ export interface ConfigTableDocument {
   sheetName?: string
   sheetNames?: string[]
   columns: string[]
-  rows: Record<string, string>[]
+  rows: ConfigTableRow[]
+  totalRows: number
+  offset: number
+  limit: number
+  search?: ConfigTableSearch
+}
+
+export interface ConfigTableRowsPage {
+  rows: ConfigTableRow[]
+  totalRows: number
+  offset: number
+  limit: number
+  search?: ConfigTableSearch
+}
+
+export interface ConfigTableQuery {
+  offset?: number
+  limit?: number
+  search?: ConfigTableSearch
+}
+
+export interface ConfigTableSaveRequest {
+  sourceType: 'xml' | 'xlsx'
+  filePath: string
+  sheetName?: string
+  columns: string[]
+  rowPatches: ConfigTableRow[]
 }
 
 export function scanConfigRoot(rootPath: string) {
@@ -37,12 +74,28 @@ export function listConfigGroupFiles(rootPath: string, groupKey: string) {
   }>
 }
 
-export function openConfigDocument(filePath: string, sheetName?: string) {
-  return sendRequest('configDocument.open', { filePath, sheetName }) as Promise<ConfigTableDocument>
+export function openConfigDocument(filePath: string, sheetName?: string, query?: ConfigTableQuery) {
+  return sendRequest('configDocument.open', {
+    filePath,
+    sheetName,
+    offset: query?.offset,
+    limit: query?.limit,
+    search: query?.search,
+  }) as Promise<ConfigTableDocument>
 }
 
-export function saveConfigDocument(document: ConfigTableDocument) {
-  return sendRequest('configDocument.save', document) as Promise<{
+export function listConfigDocumentRows(filePath: string, sheetName?: string, query?: ConfigTableQuery) {
+  return sendRequest('configDocument.rows', {
+    filePath,
+    sheetName,
+    offset: query?.offset,
+    limit: query?.limit,
+    search: query?.search,
+  }) as Promise<ConfigTableRowsPage>
+}
+
+export function saveConfigDocument(request: ConfigTableSaveRequest) {
+  return sendRequest('configDocument.save', request) as Promise<{
     status: string
   }>
 }

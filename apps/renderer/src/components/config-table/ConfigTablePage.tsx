@@ -1,4 +1,4 @@
-﻿import {
+import {
   startTransition,
   useDeferredValue,
   useEffect,
@@ -8,6 +8,10 @@
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
   FileCode2,
   FileSpreadsheet,
   FolderTree,
@@ -22,8 +26,17 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -39,15 +52,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import {
+  listConfigDocumentRows,
   listConfigGroupFiles,
   openConfigDocument,
   saveConfigDocument,
@@ -55,15 +63,19 @@ import {
   type ConfigFileEntry,
   type ConfigGroupSummary,
   type ConfigTableDocument,
+  type ConfigTableSearch,
 } from '@/services/configTable'
 import {
+  CONFIG_TABLE_ALL_COLUMNS,
+  DEFAULT_CONFIG_TABLE_PAGE_SIZE,
+  buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
-  createDocumentSnapshot,
   decidePendingNavigation,
   filterConfigFiles,
   getConfigRowIDValue,
-  hasDocumentChanges,
+  hasEditedRows,
+  mergeConfigRows,
   type PendingNavigationTarget,
 } from './configTableDocument.js'
 import { UnsavedConfigDialog } from './UnsavedConfigDialog'
@@ -73,6 +85,7 @@ const TOAST_IDS = {
   groups: 'config-groups-load-error',
   files: 'config-files-load-error',
   open: 'config-document-open-error',
+  rows: 'config-document-rows-error',
   save: 'config-document-save-error',
 } as const
 
@@ -83,8 +96,42 @@ const sourceTypeLabels: Record<ConfigFileEntry['sourceType'], string> = {
 
 type PendingNavigation = PendingNavigationTarget
 
+type ConfigSearchForm = {
+  column: string
+  value: string
+  exact: boolean
+}
+
 function getFileIcon(sourceType: ConfigFileEntry['sourceType']) {
   return sourceType === 'xml' ? FileCode2 : FileSpreadsheet
+}
+
+function createDefaultSearchForm(): ConfigSearchForm {
+  return { column: CONFIG_TABLE_ALL_COLUMNS, value: '', exact: false }
+}
+
+function mapSearchToForm(search?: ConfigTableSearch): ConfigSearchForm {
+  return {
+    column: search?.column ? search.column : CONFIG_TABLE_ALL_COLUMNS,
+    value: search?.value ?? '',
+    exact: Boolean(search?.exact),
+  }
+}
+
+function mapFormToSearch(form: ConfigSearchForm): ConfigTableSearch {
+  const value = form.value.trim()
+  if (!value) {
+    return { column: '', value: '', exact: false }
+  }
+  return {
+    column: form.column === CONFIG_TABLE_ALL_COLUMNS ? '' : form.column,
+    value,
+    exact: form.exact,
+  }
+}
+
+function areRowValuesEqual(left: Record<string, string>, right: Record<string, string>, columns: string[]) {
+  return columns.every((column) => (left[column] ?? '') === (right[column] ?? ''))
 }
 
 export function ConfigTablePage() {
@@ -98,54 +145,42 @@ export function ConfigTablePage() {
   const [activeFileType, setActiveFileType] = useState<ConfigFileEntry['sourceType']>('xml')
   const [document, setDocument] = useState<ConfigTableDocument | null>(null)
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set())
-  const [snapshot, setSnapshot] = useState('')
+  const [editedRows, setEditedRows] = useState<Map<number, Record<string, string>>>(new Map())
+  const [searchForm, setSearchForm] = useState<ConfigSearchForm>(createDefaultSearchForm())
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [openingDocument, setOpeningDocument] = useState(false)
+  const [loadingRows, setLoadingRows] = useState(false)
   const [savingDocument, setSavingDocument] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null)
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false)
   const [columnSheetOpen, setColumnSheetOpen] = useState(false)
+  const [searchColumnOpen, setSearchColumnOpen] = useState(false)
   const didInitRef = useRef(false)
 
   const deferredFileSearch = useDeferredValue(fileSearch)
-
-  const filteredFiles = useMemo(
-    () => filterConfigFiles(files, activeFileType, deferredFileSearch),
-    [activeFileType, deferredFileSearch, files]
-  )
-
-  const activeTypeFileCount = useMemo(
-    () => files.filter((file) => file.sourceType === activeFileType).length,
-    [activeFileType, files]
-  )
-
-  const visibleColumns = useMemo(
-    () => buildVisibleColumns(document?.columns ?? [], hiddenColumns),
-    [document, hiddenColumns]
-  )
+  const filteredFiles = useMemo(() => filterConfigFiles(files, activeFileType, deferredFileSearch), [activeFileType, deferredFileSearch, files])
+  const activeTypeFileCount = useMemo(() => files.filter((file) => file.sourceType === activeFileType).length, [activeFileType, files])
+  const visibleColumns = useMemo(() => buildVisibleColumns(document?.columns ?? [], hiddenColumns), [document?.columns, hiddenColumns])
   const showStickyIDColumn = visibleColumns.includes('id')
-  const dataColumns = useMemo(
-    () => (showStickyIDColumn ? visibleColumns.filter((column) => column !== 'id') : visibleColumns),
-    [showStickyIDColumn, visibleColumns]
-  )
-
-  const selectedFile = useMemo(
-    () => files.find((file) => file.filePath === selectedFilePath) ?? null,
-    [files, selectedFilePath]
-  )
-
-  const isDirty = document ? hasDocumentChanges(snapshot, document) : false
-  const headerStats = useMemo(
-    () => buildConfigTableStats(document, visibleColumns.length, isDirty),
-    [document, visibleColumns.length, isDirty]
-  )
+  const dataColumns = useMemo(() => (showStickyIDColumn ? visibleColumns.filter((column) => column !== 'id') : visibleColumns), [showStickyIDColumn, visibleColumns])
+  const selectedFile = useMemo(() => files.find((file) => file.filePath === selectedFilePath) ?? null, [files, selectedFilePath])
+  const displayedRows = useMemo(() => mergeConfigRows(document?.rows ?? [], editedRows), [document?.rows, editedRows])
+  const displayedRowLookup = useMemo(() => new Map(displayedRows.map((row) => [row.rowIndex, row.values])), [displayedRows])
+  const sourceRowLookup = useMemo(() => new Map((document?.rows ?? []).map((row) => [row.rowIndex, row.values])), [document?.rows])
+  const isDirty = hasEditedRows(editedRows)
+  const headerStats = useMemo(() => buildConfigTableStats(document, visibleColumns.length, isDirty), [document, visibleColumns.length, isDirty])
+  const pageCount = useMemo(() => (!document || document.totalRows <= 0 ? 1 : Math.max(1, Math.ceil(document.totalRows / document.limit))), [document])
+  const currentPage = useMemo(() => (!document || document.totalRows <= 0 ? 1 : Math.floor(document.offset / document.limit) + 1), [document])
+  const canGoPreviousPage = Boolean(document && document.offset > 0)
+  const canGoNextPage = Boolean(document && document.offset + document.rows.length < document.totalRows)
+  const selectedSearchColumnLabel = searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? '全部列' : searchForm.column
+  const canResetSearch = searchForm.column !== CONFIG_TABLE_ALL_COLUMNS || searchForm.value !== '' || searchForm.exact
 
   useEffect(() => {
     if (didInitRef.current) {
       return
     }
-
     didInitRef.current = true
     void switchRoot(DEFAULT_ROOT)
   }, [])
@@ -154,8 +189,10 @@ export function ConfigTablePage() {
     setSelectedFilePath('')
     setDocument(null)
     setHiddenColumns(new Set())
-    setSnapshot('')
+    setEditedRows(new Map())
+    setSearchForm(createDefaultSearchForm())
     setColumnSheetOpen(false)
+    setSearchColumnOpen(false)
     setActiveFileType('xml')
   }
 
@@ -164,19 +201,39 @@ export function ConfigTablePage() {
       setSelectedFilePath(filePath)
       setDocument(nextDocument)
       setHiddenColumns(new Set())
-      setSnapshot(createDocumentSnapshot(nextDocument))
+      setEditedRows(new Map())
+      setSearchForm(mapSearchToForm(nextDocument.search))
+      setSearchColumnOpen(false)
+    })
+  }
+
+  const applyRowsPage = (rowsPage: {
+    rows: ConfigTableDocument['rows']
+    totalRows: number
+    offset: number
+    limit: number
+    search?: ConfigTableSearch
+  }) => {
+    startTransition(() => {
+      setDocument((current) => current ? {
+        ...current,
+        rows: rowsPage.rows,
+        totalRows: rowsPage.totalRows,
+        offset: rowsPage.offset,
+        limit: rowsPage.limit,
+        search: rowsPage.search ?? current.search,
+      } : current)
+      setSearchForm(mapSearchToForm(rowsPage.search))
     })
   }
 
   const switchRoot = async (nextRootPath: string) => {
     const normalizedRootPath = nextRootPath.trim() || DEFAULT_ROOT
     setLoadingGroups(true)
-
     try {
       const groupResponse = await scanConfigRoot(normalizedRootPath)
       const nextGroups = groupResponse.groups
       const nextGroup = nextGroups[0]?.groupKey ?? ''
-
       let nextFiles: ConfigFileEntry[] = []
       if (nextGroup) {
         try {
@@ -185,7 +242,6 @@ export function ConfigTablePage() {
           toast.error('加载文件列表失败', { id: TOAST_IDS.files })
         }
       }
-
       startTransition(() => {
         setLoadedRootPath(normalizedRootPath)
         setRootPathInput(normalizedRootPath)
@@ -206,7 +262,6 @@ export function ConfigTablePage() {
     if (!groupKey || groupKey === selectedGroup) {
       return
     }
-
     setLoadingFiles(true)
     try {
       const response = await listConfigGroupFiles(loadedRootPath, groupKey)
@@ -227,10 +282,13 @@ export function ConfigTablePage() {
     if (!filePath) {
       return
     }
-
     setOpeningDocument(true)
     try {
-      const nextDocument = await openConfigDocument(filePath, sheetName)
+      const nextDocument = await openConfigDocument(filePath, sheetName, {
+        offset: 0,
+        limit: DEFAULT_CONFIG_TABLE_PAGE_SIZE,
+        search: { column: '', value: '', exact: false },
+      })
       applyDocument(filePath, nextDocument)
     } catch {
       toast.error('打开文件失败', { id: TOAST_IDS.open })
@@ -239,16 +297,48 @@ export function ConfigTablePage() {
     }
   }
 
+  const loadRowsPage = async (options: { offset?: number; search?: ConfigTableSearch } = {}) => {
+    if (!document) {
+      return
+    }
+    setLoadingRows(true)
+    try {
+      const page = await listConfigDocumentRows(document.filePath, document.sheetName, {
+        offset: options.offset ?? document.offset,
+        limit: document.limit || DEFAULT_CONFIG_TABLE_PAGE_SIZE,
+        search: options.search ?? document.search,
+      })
+      applyRowsPage(page)
+    } catch {
+      toast.error('加载表格数据失败', { id: TOAST_IDS.rows })
+    } finally {
+      setLoadingRows(false)
+    }
+  }
+
   const persistDocument = async () => {
     if (!document) {
       return false
     }
-
+    if (!isDirty) {
+      return true
+    }
     setSavingDocument(true)
     try {
-      await saveConfigDocument(document)
-      setSnapshot(createDocumentSnapshot(document))
+      const request = buildConfigSaveRequest(document, editedRows)
+      await saveConfigDocument(request)
+      setEditedRows(new Map())
       toast.success('保存成功')
+      try {
+        const page = await listConfigDocumentRows(document.filePath, document.sheetName, {
+          offset: document.offset,
+          limit: document.limit,
+          search: document.search,
+        })
+        applyRowsPage(page)
+      } catch {
+        toast.error('加载表格数据失败', { id: TOAST_IDS.rows })
+      }
       return true
     } catch {
       toast.error('保存失败', { id: TOAST_IDS.save })
@@ -282,7 +372,6 @@ export function ConfigTablePage() {
       void runPendingNavigation(target)
       return
     }
-
     setPendingNavigation(decision.pending)
     setUnsavedDialogOpen(true)
   }
@@ -320,6 +409,7 @@ export function ConfigTablePage() {
     const nextTarget = pendingNavigation
     setUnsavedDialogOpen(false)
     setPendingNavigation(null)
+    setEditedRows(new Map())
     if (nextTarget) {
       void runPendingNavigation(nextTarget)
     }
@@ -329,12 +419,10 @@ export function ConfigTablePage() {
     if (!pendingNavigation) {
       return
     }
-
     const saved = await persistDocument()
     if (!saved) {
       return
     }
-
     const nextTarget = pendingNavigation
     setUnsavedDialogOpen(false)
     setPendingNavigation(null)
@@ -342,21 +430,20 @@ export function ConfigTablePage() {
   }
 
   const handleCellChange = (rowIndex: number, column: string, value: string) => {
-    setDocument((current) => {
-      if (!current) {
+    setEditedRows((current) => {
+      const next = new Map(current)
+      const baseValues = current.get(rowIndex) ?? displayedRowLookup.get(rowIndex)
+      if (!baseValues) {
         return current
       }
-
-      const nextRows = current.rows.map((row, index) => (
-        index === rowIndex
-          ? { ...row, [column]: value }
-          : row
-      ))
-
-      return {
-        ...current,
-        rows: nextRows,
+      const nextValues = { ...baseValues, [column]: value }
+      const sourceValues = sourceRowLookup.get(rowIndex)
+      if (sourceValues && areRowValuesEqual(nextValues, sourceValues, document?.columns ?? [])) {
+        next.delete(rowIndex)
+      } else {
+        next.set(rowIndex, nextValues)
       }
+      return next
     })
   }
 
@@ -372,6 +459,44 @@ export function ConfigTablePage() {
     })
   }
 
+  const handleSearchSubmit = () => {
+    if (!document) {
+      return
+    }
+    void loadRowsPage({ offset: 0, search: mapFormToSearch(searchForm) })
+  }
+
+  const handleSearchReset = () => {
+    if (!document) {
+      return
+    }
+    const nextForm = createDefaultSearchForm()
+    setSearchForm(nextForm)
+    void loadRowsPage({ offset: 0, search: mapFormToSearch(nextForm) })
+  }
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') {
+      return
+    }
+    event.preventDefault()
+    handleSearchSubmit()
+  }
+
+  const handlePreviousPage = () => {
+    if (!document || !canGoPreviousPage) {
+      return
+    }
+    void loadRowsPage({ offset: Math.max(0, document.offset - document.limit) })
+  }
+
+  const handleNextPage = () => {
+    if (!document || !canGoNextPage) {
+      return
+    }
+    void loadRowsPage({ offset: document.offset + document.limit })
+  }
+
   return (
     <>
       <div className="grid h-full min-h-0 gap-4 bg-muted/20 p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -382,13 +507,7 @@ export function ConfigTablePage() {
               配置表目录
             </div>
             <div className="mt-3 flex gap-2">
-              <Input
-                value={rootPathInput}
-                onChange={(event) => setRootPathInput(event.target.value)}
-                onKeyDown={handleRootKeyDown}
-                placeholder={DEFAULT_ROOT}
-                className="h-9"
-              />
+              <Input value={rootPathInput} onChange={(event) => setRootPathInput(event.target.value)} onKeyDown={handleRootKeyDown} placeholder={DEFAULT_ROOT} className="h-9" />
               <Button variant="outline" size="sm" onClick={handleRootSubmit} disabled={loadingGroups}>
                 {loadingGroups ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                 加载
@@ -406,9 +525,7 @@ export function ConfigTablePage() {
                 </SelectTrigger>
                 <SelectContent>
                   {groups.map((group) => (
-                    <SelectItem key={group.groupKey} value={group.groupKey}>
-                      {group.displayName}
-                    </SelectItem>
+                    <SelectItem key={group.groupKey} value={group.groupKey}>{group.displayName}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -417,43 +534,15 @@ export function ConfigTablePage() {
 
           <div className="border-b border-border px-4 py-3">
             <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
-              <button
-                type="button"
-                onClick={() => setActiveFileType('xml')}
-                className={cn(
-                  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                  activeFileType === 'xml'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                XML
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveFileType('xlsx')}
-                className={cn(
-                  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                  activeFileType === 'xlsx'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                XLSX
-              </button>
+              <button type="button" onClick={() => setActiveFileType('xml')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xml' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XML</button>
+              <button type="button" onClick={() => setActiveFileType('xlsx')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xlsx' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XLSX</button>
             </div>
           </div>
 
           <div className="border-b border-border px-4 py-4">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={fileSearch}
-                onChange={(event) => setFileSearch(event.target.value)}
-                placeholder={activeFileType === 'xml' ? '搜索 XML 文件' : '搜索 XLSX 文件'}
-                className="h-9 pl-9"
-                disabled={activeTypeFileCount === 0 && !loadingFiles}
-              />
+              <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder={activeFileType === 'xml' ? '搜索 XML 文件' : '搜索 XLSX 文件'} className="h-9 pl-9" disabled={activeTypeFileCount === 0 && !loadingFiles} />
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
               <span>{activeFileType === 'xml' ? 'XML 列表' : 'XLSX 列表'}</span>
@@ -465,38 +554,24 @@ export function ConfigTablePage() {
             <div className="space-y-2 p-3">
               {loadingFiles ? (
                 <div className="flex items-center justify-center rounded-lg border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                  加载文件列表中
+                  <Loader2 className="mr-2 size-4 animate-spin" />加载文件列表中
                 </div>
-              ) : filteredFiles.length > 0 ? (
-                filteredFiles.map((file) => {
-                  const FileIcon = getFileIcon(file.sourceType)
-                  const active = file.filePath === selectedFilePath
-
-                  return (
-                    <button
-                      key={file.id}
-                      type="button"
-                      onClick={() => handleFileOpen(file.filePath)}
-                      className={cn(
-                        'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors',
-                        active
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border bg-background hover:border-primary/40 hover:bg-accent/50'
-                      )}
-                    >
-                      <FileIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">{file.fileName}</div>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="secondary">{sourceTypeLabels[file.sourceType]}</Badge>
-                          <span className="truncate">{file.groupKey}</span>
-                        </div>
+              ) : filteredFiles.length > 0 ? filteredFiles.map((file) => {
+                const FileIcon = getFileIcon(file.sourceType)
+                const active = file.filePath === selectedFilePath
+                return (
+                  <button key={file.id} type="button" onClick={() => handleFileOpen(file.filePath)} className={cn('flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors', active ? 'border-primary bg-primary/5' : 'border-border bg-background hover:border-primary/40 hover:bg-accent/50')}>
+                    <FileIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">{file.fileName}</div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant="secondary">{sourceTypeLabels[file.sourceType]}</Badge>
+                        <span className="truncate">{file.groupKey}</span>
                       </div>
-                    </button>
-                  )
-                })
-              ) : (
+                    </div>
+                  </button>
+                )
+              }) : (
                 <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                   {selectedGroup ? `当前${activeFileType.toUpperCase()}列表没有匹配文件` : '请先选择配置组'}
                 </div>
@@ -509,57 +584,27 @@ export function ConfigTablePage() {
           <div className="rounded-xl border border-border bg-background shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <TableProperties className="size-4 text-primary" />
-                  配置表编辑器
-                </div>
-                <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                  {selectedFile
-                    ? `当前文件：${selectedFile.fileName}`
-                    : '从左侧选择一个 XML 或 XLSX 文件开始查看和编辑'}
-                </div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground"><TableProperties className="size-4 text-primary" />配置表编辑器</div>
+                <div className="mt-1 truncate text-[11px] text-muted-foreground">{selectedFile ? `当前文件：${selectedFile.fileName}` : '从左侧选择一个 XML 或 XLSX 文件开始查看和编辑'}</div>
               </div>
-
               <div className="flex flex-wrap items-center gap-2">
                 {selectedFile ? <Badge variant="secondary">{sourceTypeLabels[selectedFile.sourceType]}</Badge> : null}
                 {document?.sourceType === 'xlsx' && document.sheetNames && document.sheetNames.length > 0 ? (
                   <Select value={document.sheetName} onValueChange={handleSheetChange}>
-                    <SelectTrigger size="sm" className="min-w-32">
-                      <SelectValue placeholder="选择 Sheet" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {document.sheetNames.map((sheetName) => (
-                        <SelectItem key={sheetName} value={sheetName}>
-                          {sheetName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
+                    <SelectTrigger size="sm" className="min-w-32"><SelectValue placeholder="选择 Sheet" /></SelectTrigger>
+                    <SelectContent>{document.sheetNames.map((sheetName) => <SelectItem key={sheetName} value={sheetName}>{sheetName}</SelectItem>)}</SelectContent>
                   </Select>
                 ) : null}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setColumnSheetOpen(true)}
-                  disabled={!document}
-                >
-                  <SlidersHorizontal className="size-4" />
-                  列显示
-                </Button>
-                <Button size="sm" onClick={() => void persistDocument()} disabled={!document || savingDocument || openingDocument}>
-                  {savingDocument ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                  保存
+                <Button variant="outline" size="sm" onClick={() => setColumnSheetOpen(true)} disabled={!document}><SlidersHorizontal className="size-4" />列显示</Button>
+                <Button size="sm" onClick={() => void persistDocument()} disabled={!document || !isDirty || savingDocument || openingDocument}>
+                  {savingDocument ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}保存
                 </Button>
               </div>
             </div>
-
             <div className="flex flex-wrap gap-2 px-4 py-2.5">
               {headerStats.map((item) => (
-                <div
-                  key={item.label}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-[11px] text-muted-foreground"
-                >
-                  <span>{item.label}</span>
-                  <span className="font-medium text-foreground">{item.value}</span>
+                <div key={item.label} className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/20 px-2.5 py-1 text-[11px] text-muted-foreground">
+                  <span>{item.label}</span><span className="font-medium text-foreground">{item.value}</span>
                 </div>
               ))}
             </div>
@@ -568,70 +613,91 @@ export function ConfigTablePage() {
           <div className="min-h-0 flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm">
             <div className="border-b border-border px-5 py-3">
               <div className="text-sm font-semibold text-foreground">表格数据</div>
-              <div className="mt-1 text-xs text-muted-foreground">仅支持修改已有单元格的值，不支持新增或删除行列。</div>
+              <div className="mt-1 text-xs text-muted-foreground">大文件按页加载；搜索由本地服务执行；保存仅回写已修改行。</div>
+            </div>
+
+            <div className="border-b border-border px-5 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-1 flex-wrap items-center gap-2">
+                  <Popover open={searchColumnOpen} onOpenChange={setSearchColumnOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" role="combobox" aria-expanded={searchColumnOpen} className="min-w-36 justify-between font-normal" disabled={!document}>
+                        <span className="truncate">{selectedSearchColumnLabel}</span>
+                        <ChevronsUpDown className="size-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    {document ? (
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="搜索列名" />
+                          <CommandList>
+                            <CommandEmpty>没有匹配列名</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem value="全部列" onSelect={() => { setSearchForm((current) => ({ ...current, column: CONFIG_TABLE_ALL_COLUMNS })); setSearchColumnOpen(false) }}>
+                                <Check className={cn('mr-2 size-4', searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? 'opacity-100' : 'opacity-0')} />全部列
+                              </CommandItem>
+                              {document.columns.map((column) => (
+                                <CommandItem key={column} value={column} onSelect={() => { setSearchForm((current) => ({ ...current, column })); setSearchColumnOpen(false) }}>
+                                  <Check className={cn('mr-2 size-4', searchForm.column === column ? 'opacity-100' : 'opacity-0')} />{column}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    ) : null}
+                  </Popover>
+
+                  <Input value={searchForm.value} onChange={(event) => setSearchForm((current) => ({ ...current, value: event.target.value }))} onKeyDown={handleSearchKeyDown} placeholder="输入搜索内容" className="h-8 min-w-56 flex-1" disabled={!document} />
+
+                  <label className="flex items-center gap-2 rounded-md border border-border/70 px-3 py-1.5 text-xs text-muted-foreground">
+                    <Checkbox checked={searchForm.exact} disabled={!document} onCheckedChange={(checked) => setSearchForm((current) => ({ ...current, exact: checked === true }))} />完全匹配
+                  </label>
+
+                  <Button size="sm" onClick={handleSearchSubmit} disabled={!document || loadingRows || openingDocument}><Search className="size-4" />搜索</Button>
+                  <Button variant="outline" size="sm" onClick={handleSearchReset} disabled={!document || !canResetSearch || loadingRows}>重置</Button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>第 {currentPage} / {pageCount} 页</span>
+                  <span>共 {document?.totalRows ?? 0} 条</span>
+                  {loadingRows ? <Loader2 className="size-4 animate-spin" /> : null}
+                  <Button variant="outline" size="icon-sm" onClick={handlePreviousPage} disabled={!canGoPreviousPage || loadingRows}><ChevronLeft className="size-4" /></Button>
+                  <Button variant="outline" size="icon-sm" onClick={handleNextPage} disabled={!canGoNextPage || loadingRows}><ChevronRight className="size-4" /></Button>
+                </div>
+              </div>
             </div>
 
             <div className="min-h-0 flex-1">
               {openingDocument ? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                  正在打开文件
-                </div>
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" />正在打开文件</div>
               ) : !document ? (
-                <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                  请选择左侧文件以查看配置内容。
-                </div>
+                <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">请选择左侧文件以查看配置内容。</div>
               ) : visibleColumns.length === 0 ? (
-                <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                  当前所有列都被隐藏了，请在“列显示”里至少勾选一列。
-                </div>
+                <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">当前所有列都被隐藏了，请在“列显示”里至少勾选一列。</div>
               ) : (
                 <div className="h-full overflow-auto">
                   <div className="min-w-max p-4">
                     <table className="min-w-full w-max caption-bottom text-sm">
                       <TableHeader>
                         <TableRow>
-                          {showStickyIDColumn ? (
-                            <TableHead className="sticky top-0 left-0 z-50 w-24 min-w-24 border-r border-border bg-background/95 text-center shadow-[10px_0_18px_-12px_rgba(15,23,42,0.42),0_10px_18px_-14px_rgba(15,23,42,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
-                              id
-                            </TableHead>
-                          ) : null}
-                          {dataColumns.map((column) => (
-                            <TableHead
-                              key={column}
-                              className="sticky top-0 z-30 min-w-40 bg-background/95 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.48)] backdrop-blur supports-[backdrop-filter]:bg-background/85"
-                            >
-                              {column}
-                            </TableHead>
-                          ))}
+                          {showStickyIDColumn ? <TableHead className="sticky top-0 left-0 z-50 w-24 min-w-24 border-r border-border bg-background/95 text-center shadow-[10px_0_18px_-12px_rgba(15,23,42,0.42),0_10px_18px_-14px_rgba(15,23,42,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/85">id</TableHead> : null}
+                          {dataColumns.map((column) => <TableHead key={column} className="sticky top-0 z-30 min-w-40 bg-background/95 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.48)] backdrop-blur supports-[backdrop-filter]:bg-background/85">{column}</TableHead>)}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {document.rows.length > 0 ? document.rows.map((row, rowIndex) => (
-                          <TableRow key={`${document.filePath}-${document.sheetName ?? 'xml'}-${rowIndex}`}>
-                            {showStickyIDColumn ? (
-                              <TableCell className="sticky left-0 z-20 w-24 min-w-24 border-r border-border bg-background/98 text-center text-xs font-medium text-foreground shadow-[10px_0_18px_-12px_rgba(15,23,42,0.34)]">
-                                {getConfigRowIDValue(row)}
-                              </TableCell>
-                            ) : null}
+                        {displayedRows.length > 0 ? displayedRows.map((row) => (
+                          <TableRow key={`${document.filePath}-${document.sheetName ?? 'xml'}-${row.rowIndex}`}>
+                            {showStickyIDColumn ? <TableCell className="sticky left-0 z-20 w-24 min-w-24 border-r border-border bg-background/98 text-center text-xs font-medium text-foreground shadow-[10px_0_18px_-12px_rgba(15,23,42,0.34)]">{getConfigRowIDValue(row)}</TableCell> : null}
                             {dataColumns.map((column) => (
-                              <TableCell key={`${rowIndex}-${column}`} className="min-w-40">
-                                <Input
-                                  value={row[column] ?? ''}
-                                  onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
-                                  className="h-8 min-w-32 border-border/70 bg-background"
-                                />
+                              <TableCell key={`${row.rowIndex}-${column}`} className="min-w-40">
+                                <Input value={row.values[column] ?? ''} onChange={(event) => handleCellChange(row.rowIndex, column, event.target.value)} className="h-8 min-w-32 border-border/70 bg-background" />
                               </TableCell>
                             ))}
                           </TableRow>
                         )) : (
                           <TableRow>
-                            <TableCell
-                              colSpan={dataColumns.length + (showStickyIDColumn ? 1 : 0)}
-                              className="py-8 text-center text-sm text-muted-foreground"
-                            >
-                              当前文件没有可展示的数据。
-                            </TableCell>
+                            <TableCell colSpan={dataColumns.length + (showStickyIDColumn ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">{searchForm.value.trim() ? '当前搜索没有匹配数据。' : '当前文件没有可展示的数据。'}</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -647,47 +713,24 @@ export function ConfigTablePage() {
       <Sheet open={columnSheetOpen} onOpenChange={setColumnSheetOpen}>
         <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
           <SheetHeader className="border-b border-border px-5 py-4">
-            <SheetTitle className="flex items-center gap-2 text-base">
-              <SlidersHorizontal className="size-4 text-primary" />
-              列显示控制
-            </SheetTitle>
-            <SheetDescription>
-              默认全选。取消后只隐藏展示，不影响实际保存内容。
-            </SheetDescription>
+            <SheetTitle className="flex items-center gap-2 text-base"><SlidersHorizontal className="size-4 text-primary" />列显示控制</SheetTitle>
+            <SheetDescription>默认全选。取消后只隐藏展示，不影响实际保存内容。</SheetDescription>
           </SheetHeader>
-
-          <div className="border-b border-border px-5 py-3 text-xs text-muted-foreground">
-            共 {document?.columns.length ?? 0} 列，当前显示 {visibleColumns.length} 列
-          </div>
-
+          <div className="border-b border-border px-5 py-3 text-xs text-muted-foreground">共 {document?.columns.length ?? 0} 列，当前显示 {visibleColumns.length} 列</div>
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-2 px-5 py-4">
               {document?.columns.length ? document.columns.map((column) => (
-                <label
-                  key={column}
-                  className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-sm text-foreground"
-                >
-                  <Checkbox
-                    checked={!hiddenColumns.has(column)}
-                    onCheckedChange={(checked) => toggleColumnVisibility(column, checked === true)}
-                  />
+                <label key={column} className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-sm text-foreground">
+                  <Checkbox checked={!hiddenColumns.has(column)} onCheckedChange={(checked) => toggleColumnVisibility(column, checked === true)} />
                   <span className="min-w-0 flex-1 break-all">{column}</span>
                 </label>
-              )) : (
-                <div className="px-1 py-2 text-sm text-muted-foreground">打开文件后可选择要展示的列。</div>
-              )}
+              )) : <div className="px-1 py-2 text-sm text-muted-foreground">打开文件后可选择要展示的列。</div>}
             </div>
           </ScrollArea>
         </SheetContent>
       </Sheet>
 
-      <UnsavedConfigDialog
-        open={unsavedDialogOpen}
-        onCancel={handleCancelPendingNavigation}
-        onDiscardAndSwitch={handleDiscardAndSwitch}
-        onSaveAndSwitch={() => void handleSaveAndSwitch()}
-      />
+      <UnsavedConfigDialog open={unsavedDialogOpen} onCancel={handleCancelPendingNavigation} onDiscardAndSwitch={handleDiscardAndSwitch} onSaveAndSwitch={() => void handleSaveAndSwitch()} />
     </>
   )
 }
-
