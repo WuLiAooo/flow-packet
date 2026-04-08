@@ -12,6 +12,7 @@ The feature must let users:
 - edit existing cell values only
 - save back to the currently opened source only
 - confirm before switching context when there are unsaved changes
+- enter the feature from 2 UI entry points
 
 ## Scope
 In scope:
@@ -45,6 +46,16 @@ Grouping rule:
 - the logical group key is `meta_xxx`
 
 ## User Experience
+### Entry Points
+The feature is reachable from 2 places:
+- below the existing quick-add entry area
+- after entering a connection, as a new `配置表` tab placed below the existing `API` tab
+
+Rules:
+- both entry points open the same configuration-table experience
+- both entry points share the same backend and document model
+- the connection-page entry must not depend on the API tab's game-service state
+
 ### Left Sidebar
 Top to bottom:
 - root folder selector
@@ -170,6 +181,7 @@ Recommended actions:
 
 ## Frontend Design
 Renderer responsibilities:
+- expose the feature in both required entry points
 - folder selection UI
 - group dropdown UI
 - file search and file list UI
