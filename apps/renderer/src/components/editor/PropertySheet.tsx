@@ -88,9 +88,9 @@ function BeginEditor({ nodeId }: { nodeId: string }) {
       <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
         <div>
           <div className="text-sm font-medium text-foreground">Session Runtime</div>
-          <div className="text-xs text-muted-foreground">
-            After login receives GcPlayerInfo, the current Begin session will show role information here.
-          </div>
+//           <div className="text-xs text-muted-foreground">
+//             After login receives GcPlayerInfo, the current Begin session will show role information here.
+//           </div>
         </div>
         <ReadonlyCopyField label="roleId" value={sessionRuntime?.roleId} />
         <ReadonlyCopyField label="allianceId" value={sessionRuntime?.allianceId} />
