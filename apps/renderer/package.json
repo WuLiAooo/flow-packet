@@ -10,10 +10,12 @@
     "build": "tsc -b && vite build",
     "build:electron": "tsc -p ../../electron/tsconfig.json && node -e \"const fs=require('fs');const p=require('path');const d='dist-electron';fs.readdirSync(d).filter(f=>f.endsWith('.js')).forEach(f=>fs.renameSync(p.join(d,f),p.join(d,f.replace('.js','.cjs'))))\"",
     "build:all": "npm run build:backend && npm run build && npm run build:electron",
-    "pack": "npm run build:all && electron-builder --win",
+    "pack": "npm run build:all && electron-builder",
+    "pack:win": "npm run build:all && electron-builder --win",
+    "pack:mac": "npm run build:all && electron-builder --mac",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build:backend": "cd ..\\server && go build -o flow-packet.exe .\\cmd\\flow-packet"
+    "build:backend": "node scripts/build-backend.cjs"
   },
   "build": {
     "appId": "com.flow-packet.app",
@@ -27,13 +29,24 @@
     ],
     "extraResources": [
       {
-        "from": "../server/flow-packet.exe",
-        "to": "go-backend/flow-packet.exe"
+        "from": "../server",
+        "to": "go-backend",
+        "filter": [
+          "flow-packet",
+          "flow-packet.exe"
+        ]
       }
     ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
     },
     "nsis": {
       "oneClick": false,
