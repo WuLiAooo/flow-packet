@@ -26,6 +26,11 @@ export interface ConfigTableRow {
   values: Record<string, string>
 }
 
+export interface ConfigTableColumnMeta {
+  column: string
+  headerLines?: string[]
+}
+
 export interface ConfigTableDocument {
   sourceType: 'xml' | 'xlsx'
   filePath: string
@@ -33,6 +38,8 @@ export interface ConfigTableDocument {
   sheetName?: string
   sheetNames?: string[]
   columns: string[]
+  columnMeta?: ConfigTableColumnMeta[]
+  headerRowCount?: number
   rows: ConfigTableRow[]
   totalRows: number
   offset: number

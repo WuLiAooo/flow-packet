@@ -5,6 +5,7 @@ import {
   CONFIG_TABLE_ALL_COLUMNS,
   CONFIG_TABLE_TAB_ID,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
+  buildConfigColumnHeaderState,
   buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
@@ -70,6 +71,31 @@ test('computeConfigVirtualWindow returns an overscanned visible slice and spacer
       endIndex: 16,
       offsetTop: 384,
       offsetBottom: 3984,
+    },
+  )
+})
+
+test('buildConfigColumnHeaderState promotes the english header line and keeps side labels compact', () => {
+  assert.deepEqual(
+    buildConfigColumnHeaderState('id', {
+      column: 'id',
+      headerLines: ['??', 'id', 'int'],
+    }),
+    {
+      topLines: ['??'],
+      primaryLine: 'id',
+      bottomLines: ['int'],
+    },
+  )
+  assert.deepEqual(
+    buildConfigColumnHeaderState('groupid', {
+      column: 'groupid',
+      headerLines: ['??', 'groupid'],
+    }),
+    {
+      topLines: ['??'],
+      primaryLine: 'groupid',
+      bottomLines: [],
     },
   )
 })

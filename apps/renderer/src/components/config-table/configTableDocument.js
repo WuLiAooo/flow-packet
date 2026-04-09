@@ -90,6 +90,22 @@ export function computeConfigVirtualWindow({
   }
 }
 
+export function buildConfigColumnHeaderState(column, columnMeta) {
+  const normalizedLines = (columnMeta?.headerLines ?? []).map((line) => String(line ?? '').trim())
+  let primaryIndex = normalizedLines.findIndex((line) => line && line === column)
+  if (primaryIndex < 0) {
+    primaryIndex = normalizedLines.length >= 2 && normalizedLines[1]
+      ? 1
+      : normalizedLines.findIndex(Boolean)
+  }
+
+  return {
+    topLines: primaryIndex > 0 ? normalizedLines.slice(0, primaryIndex).filter(Boolean) : [],
+    primaryLine: primaryIndex >= 0 ? (normalizedLines[primaryIndex] || column) : column,
+    bottomLines: primaryIndex >= 0 ? normalizedLines.slice(primaryIndex + 1).filter(Boolean) : [],
+  }
+}
+
 export function buildConfigSaveRequest(document, editedRows) {
   return {
     sourceType: document.sourceType,

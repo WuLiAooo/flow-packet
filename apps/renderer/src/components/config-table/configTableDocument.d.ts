@@ -8,6 +8,11 @@ export type ConfigTableRow = {
   values: Record<string, string>
 }
 
+export type ConfigTableColumnMeta = {
+  column: string
+  headerLines?: string[]
+}
+
 export type SnapshotDocument = {
   columns: string[]
   rows: ConfigTableRow[] | Record<string, string>[]
@@ -86,6 +91,14 @@ export function computeConfigVirtualWindow(args: {
   endIndex: number
   offsetTop: number
   offsetBottom: number
+}
+export function buildConfigColumnHeaderState(
+  column: string,
+  columnMeta?: ConfigTableColumnMeta | null,
+): {
+  topLines: string[]
+  primaryLine: string
+  bottomLines: string[]
 }
 export function buildConfigSaveRequest(
   document: ConfigTableDocumentLike,

@@ -67,6 +67,7 @@ import {
   CONFIG_TABLE_ALL_COLUMNS,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
   appendConfigRowsPage,
+  buildConfigColumnHeaderState,
   buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
@@ -171,6 +172,16 @@ export function ConfigTablePage() {
   const dataColumns = useMemo(() => (showStickyIDColumn ? visibleColumns.filter((column) => column !== 'id') : visibleColumns), [showStickyIDColumn, visibleColumns])
   const tableColumnCount = dataColumns.length + (showStickyIDColumn ? 1 : 0)
   const selectedFile = useMemo(() => files.find((file) => file.filePath === selectedFilePath) ?? null, [files, selectedFilePath])
+  const columnMetaByColumn = useMemo(() => {
+    const next = new Map<string, NonNullable<ConfigTableDocument['columnMeta']>[number]>()
+    for (const [index, column] of (document?.columns ?? []).entries()) {
+      const meta = document?.columnMeta?.[index]
+      if (meta) {
+        next.set(column, meta)
+      }
+    }
+    return next
+  }, [document?.columnMeta, document?.columns])
   const displayedRows = useMemo(() => mergeConfigRows(document?.rows ?? [], editedRows), [document?.rows, editedRows])
   const displayedRowLookup = useMemo(() => new Map(displayedRows.map((row) => [row.rowIndex, row.values])), [displayedRows])
   const sourceRowLookup = useMemo(() => new Map((document?.rows ?? []).map((row) => [row.rowIndex, row.values])), [document?.rows])
@@ -195,6 +206,21 @@ export function ConfigTablePage() {
   const canLoadMoreRows = Boolean(document && document.rows.length < document.totalRows)
   const selectedSearchColumnLabel = searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? '全部列' : searchForm.column
   const canResetSearch = searchForm.column !== CONFIG_TABLE_ALL_COLUMNS || searchForm.value !== '' || searchForm.exact
+
+  const renderColumnHeaderContent = (column: string, align: 'left' | 'center' = 'left') => {
+    const headerState = buildConfigColumnHeaderState(column, columnMetaByColumn.get(column))
+    return (
+      <div className={cn('flex min-w-0 flex-col gap-0.5', align === 'center' ? 'items-center text-center' : 'items-start text-left')}>
+        {headerState.topLines.map((line, index) => (
+          <div key={`${column}-top-${index}`} className="max-w-full truncate text-[10px] font-normal leading-4 text-muted-foreground/90">{line}</div>
+        ))}
+        <div className="max-w-full truncate text-[13px] font-semibold leading-4 text-foreground">{headerState.primaryLine}</div>
+        {headerState.bottomLines.map((line, index) => (
+          <div key={`${column}-bottom-${index}`} className="max-w-full truncate text-[10px] font-normal leading-4 text-muted-foreground/80">{line}</div>
+        ))}
+      </div>
+    )
+  }
 
   useEffect(() => {
     if (didInitRef.current) {
@@ -728,8 +754,16 @@ export function ConfigTablePage() {
                     <table className="min-w-full w-max caption-bottom text-sm">
                       <TableHeader>
                         <TableRow>
-                          {showStickyIDColumn ? <TableHead className="sticky top-0 left-0 z-50 w-24 min-w-24 border-r border-border bg-background/95 text-center shadow-[10px_0_18px_-12px_rgba(15,23,42,0.42),0_10px_18px_-14px_rgba(15,23,42,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/85">id</TableHead> : null}
-                          {dataColumns.map((column) => <TableHead key={column} className="sticky top-0 z-30 min-w-40 bg-background/95 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.48)] backdrop-blur supports-[backdrop-filter]:bg-background/85">{column}</TableHead>)}
+                          {showStickyIDColumn ? (
+                            <TableHead className="sticky top-0 left-0 z-50 h-auto w-24 min-w-24 border-r border-border bg-background/95 py-2 text-center shadow-[10px_0_18px_-12px_rgba(15,23,42,0.42),0_10px_18px_-14px_rgba(15,23,42,0.5)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                              {renderColumnHeaderContent('id', 'center')}
+                            </TableHead>
+                          ) : null}
+                          {dataColumns.map((column) => (
+                            <TableHead key={column} className="sticky top-0 z-30 h-auto min-w-40 bg-background/95 py-2 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.48)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                              {renderColumnHeaderContent(column)}
+                            </TableHead>
+                          ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
