@@ -81,6 +81,10 @@ export function mergeConfigRows(
   rows: ConfigTableRow[],
   editedRows: Map<number, Record<string, string>>,
 ): ConfigTableRow[]
+export function applySavedRowPatches(
+  rows: ConfigTableRow[],
+  editedRows: Map<number, Record<string, string>>,
+): ConfigTableRow[]
 export function appendConfigRowsPage(
   currentRows: ConfigTableRow[],
   nextRows: ConfigTableRow[],

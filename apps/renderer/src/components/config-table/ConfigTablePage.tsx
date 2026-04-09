@@ -69,6 +69,7 @@ import {
   CONFIG_TABLE_ALL_COLUMNS,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
   appendConfigRowsPage,
+  applySavedRowPatches,
   buildConfigColumnHeaderState,
   choosePreferredConfigGroup,
   buildConfigSaveRequest,
@@ -409,7 +410,14 @@ export function ConfigTablePage() {
     setSavingDocument(true)
     try {
       const request = buildConfigSaveRequest(document, editedRows)
+      const savedRows = editedRows
       await saveConfigDocument(request)
+      startTransition(() => {
+        setDocument((current) => current ? {
+          ...current,
+          rows: applySavedRowPatches(current.rows ?? [], savedRows),
+        } : current)
+      })
       setEditedRows(new Map())
       toast.success('保存成功')
       return true

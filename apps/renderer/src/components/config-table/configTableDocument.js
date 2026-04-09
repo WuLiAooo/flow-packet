@@ -1,4 +1,4 @@
-﻿export const CONFIG_TABLE_TAB_ID = 'config-table'
+export const CONFIG_TABLE_TAB_ID = 'config-table'
 export const CONFIG_TABLE_ALL_COLUMNS = '__all__'
 export const DEFAULT_CONFIG_TABLE_PAGE_SIZE = 200
 
@@ -45,6 +45,22 @@ export function buildConfigTableStats(document, visibleColumnCount, isDirty) {
 }
 
 export function mergeConfigRows(rows, editedRows) {
+  return rows.map((row) => {
+    const patch = editedRows.get(row.rowIndex)
+    if (!patch) {
+      return row
+    }
+    return {
+      ...row,
+      values: {
+        ...row.values,
+        ...patch,
+      },
+    }
+  })
+}
+
+export function applySavedRowPatches(rows, editedRows) {
   return rows.map((row) => {
     const patch = editedRows.get(row.rowIndex)
     if (!patch) {

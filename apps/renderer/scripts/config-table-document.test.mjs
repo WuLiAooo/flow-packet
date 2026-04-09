@@ -1,7 +1,8 @@
-﻿import test from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   appendConfigRowsPage,
+  applySavedRowPatches,
   choosePreferredConfigGroup,
   CONFIG_TABLE_ALL_COLUMNS,
   CONFIG_TABLE_TAB_ID,
@@ -57,6 +58,22 @@ test('mergeConfigRows overlays edited row values onto the currently loaded page'
 
   assert.deepEqual(mergeConfigRows(rows, editedRows), [
     { rowIndex: 1, values: { id: '2', name: 'boss_reward_new', groupid: '20' } },
+  ])
+})
+
+test('applySavedRowPatches updates the loaded page baseline after save succeeds', () => {
+  const rows = [
+    { rowIndex: 0, values: { id: '1', name: 'alpha', groupid: '10' } },
+    { rowIndex: 1, values: { id: '2', name: 'boss_reward', groupid: '20' } },
+  ]
+  const editedRows = new Map([
+    [1, { id: '2', name: 'boss_reward_new', groupid: '99' }],
+    [5, { id: '6', name: 'off_page', groupid: '100' }],
+  ])
+
+  assert.deepEqual(applySavedRowPatches(rows, editedRows), [
+    { rowIndex: 0, values: { id: '1', name: 'alpha', groupid: '10' } },
+    { rowIndex: 1, values: { id: '2', name: 'boss_reward_new', groupid: '99' } },
   ])
 })
 
