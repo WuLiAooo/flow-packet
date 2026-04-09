@@ -2,11 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1495,6 +1498,24 @@ func makeGameAPIExecuteHandler() HandlerFunc {
 	}
 }
 
+func normalizeGameAPIExecuteErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "\u6267\u884capi\u8d85\u65f6"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "\u6267\u884capi\u8d85\u65f6"
+	}
+	normalized := strings.TrimSpace(err.Error())
+	if strings.Contains(normalized, "Client.Timeout exceeded") || strings.Contains(strings.ToLower(normalized), "timeout") {
+		return "\u6267\u884capi\u8d85\u65f6"
+	}
+	return normalized
+}
+
 func callGameAPI(command string, params map[string]string) (int, string, any, error) {
 	cfg, err := loadGameAPIClientConfig()
 	if err != nil {
@@ -1516,10 +1537,10 @@ func callGameAPI(command string, params map[string]string) (int, string, any, er
 		query.Set("_params", string(body))
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 3 * time.Minute}
 	resp, err := client.Get(cfg.URL + "?" + query.Encode())
 	if err != nil {
-		return 0, "", nil, fmt.Errorf("request game api: %w", err)
+		return 0, "", nil, fmt.Errorf("%s", normalizeGameAPIExecuteErrorMessage(err))
 	}
 	defer resp.Body.Close()
 

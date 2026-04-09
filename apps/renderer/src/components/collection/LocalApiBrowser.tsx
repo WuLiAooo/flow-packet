@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   useCallback,
   useDeferredValue,
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { LOCAL_API_LIST_LOAD_ERROR_TOAST_ID, getLocalApiListLoadErrorMessage } from './localApiErrorMessage.js'
+import { LOCAL_API_EXECUTE_TIMEOUT_MESSAGE, LOCAL_API_LIST_LOAD_ERROR_TOAST_ID, getLocalApiExecuteErrorMessage, getLocalApiListLoadErrorMessage } from './localApiErrorMessage.js'
 
 const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors'
 const resultActiveHighlightClassName = 'bg-amber-400 ring-1 ring-amber-700'
@@ -409,8 +409,12 @@ export function LocalApiBrowser() {
       setResult(response)
       setActiveResultMatchIndex(0)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast.error('\u6267\u884c API \u5931\u8d25', { description: message })
+      const message = getLocalApiExecuteErrorMessage(error instanceof Error ? error.message : String(error))
+      if (message === LOCAL_API_EXECUTE_TIMEOUT_MESSAGE) {
+        toast.error(LOCAL_API_EXECUTE_TIMEOUT_MESSAGE)
+      } else {
+        toast.error('\u6267\u884c API \u5931\u8d25', { description: message })
+      }
     } finally {
       setExecuting(false)
     }

@@ -188,5 +188,8 @@ export async function listLocalGameApis() {
 }
 
 export async function executeLocalGameApi(command: string, params: Record<string, string>) {
-  return sendRequest('gameapi.execute', { command, params }) as Promise<LocalGameApiExecuteResult>
+  return sendRequest('gameapi.execute', { command, params }, {
+    timeoutMs: 180000,
+    timeoutMessage: '\u6267\u884capi\u8d85\u65f6',
+  }) as Promise<LocalGameApiExecuteResult>
 }

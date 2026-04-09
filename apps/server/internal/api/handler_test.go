@@ -2,10 +2,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -536,5 +538,24 @@ func TestLegacyCollectionsMigrateToGlobalFile(t *testing.T) {
 	}
 	if len(collections.Items) != 2 {
 		t.Fatalf("item count after restart = %d, want 2", len(collections.Items))
+	}
+}
+
+func TestNormalizeGameAPIExecuteErrorMessageMasksTimeout(t *testing.T) {
+	msg := normalizeGameAPIExecuteErrorMessage(context.DeadlineExceeded)
+	if msg != "执行api超时" {
+		t.Fatalf("unexpected timeout message: %s", msg)
+	}
+
+	msg = normalizeGameAPIExecuteErrorMessage(&net.DNSError{IsTimeout: true})
+	if msg != "执行api超时" {
+		t.Fatalf("unexpected network timeout message: %s", msg)
+	}
+}
+
+func TestNormalizeGameAPIExecuteErrorMessagePreservesNonTimeoutError(t *testing.T) {
+	msg := normalizeGameAPIExecuteErrorMessage(fmt.Errorf("boom"))
+	if msg != "boom" {
+		t.Fatalf("unexpected non-timeout message: %s", msg)
 	}
 }

@@ -20,6 +20,11 @@ const RECONNECT_BASE = 1000
 const RECONNECT_MAX = 10000
 
 const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+
+export interface SendRequestOptions {
+  timeoutMs?: number
+  timeoutMessage?: string
+}
 const eventSubscribers = new Map<string, Set<EventCallback>>()
 let connectionStatusCallback: ((connected: boolean) => void) | null = null
 
@@ -75,7 +80,7 @@ export function isConnected(): boolean {
   return ws?.readyState === WebSocket.OPEN
 }
 
-export function sendRequest(action: string, payload?: unknown): Promise<unknown> {
+export function sendRequest(action: string, payload?: unknown, options?: SendRequestOptions): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('WebSocket not connected'))
@@ -83,10 +88,12 @@ export function sendRequest(action: string, payload?: unknown): Promise<unknown>
     }
 
     const id = crypto.randomUUID()
+    const timeoutMs = options?.timeoutMs ?? 30000
+    const timeoutMessage = options?.timeoutMessage ?? 'Request timeout'
     const timer = setTimeout(() => {
       pendingRequests.delete(id)
-      reject(new Error('Request timeout'))
-    }, 30000)
+      reject(new Error(timeoutMessage))
+    }, timeoutMs)
 
     pendingRequests.set(id, { resolve, reject, timer })
 
