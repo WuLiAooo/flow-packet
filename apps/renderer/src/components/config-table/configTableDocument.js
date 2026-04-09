@@ -1,4 +1,4 @@
-export const CONFIG_TABLE_TAB_ID = 'config-table'
+﻿export const CONFIG_TABLE_TAB_ID = 'config-table'
 export const CONFIG_TABLE_ALL_COLUMNS = '__all__'
 export const DEFAULT_CONFIG_TABLE_PAGE_SIZE = 200
 
@@ -30,10 +30,10 @@ export function decidePendingNavigation(isDirty, pendingTarget) {
 
 export function buildConfigTableStats(document, visibleColumnCount, isDirty) {
   return [
-    { label: '列', value: String(document?.columns?.length ?? 0) },
-    { label: '行', value: String(document?.totalRows ?? document?.rows?.length ?? 0) },
-    { label: '显示', value: String(visibleColumnCount) },
-    { label: '状态', value: isDirty ? '未保存' : '已同步' },
+    { label: '\u5217', value: String(document?.columns?.length ?? 0) },
+    { label: '\u884c', value: String(document?.totalRows ?? document?.rows?.length ?? 0) },
+    { label: '\u663e\u793a', value: String(visibleColumnCount) },
+    { label: '\u72b6\u6001', value: isDirty ? '\u672a\u4fdd\u5b58' : '\u5df2\u540c\u6b65' },
   ]
 }
 
@@ -51,6 +51,43 @@ export function mergeConfigRows(rows, editedRows) {
       },
     }
   })
+}
+
+export function appendConfigRowsPage(currentRows, nextRows) {
+  const seenRowIndexes = new Set(currentRows.map((row) => row.rowIndex))
+  const appendedRows = nextRows.filter((row) => !seenRowIndexes.has(row.rowIndex))
+  return [...currentRows, ...appendedRows]
+}
+
+export function computeConfigVirtualWindow({
+  rowCount,
+  scrollTop,
+  viewportHeight,
+  rowHeight,
+  overscan,
+}) {
+  if (rowCount <= 0 || rowHeight <= 0 || viewportHeight <= 0) {
+    return {
+      startIndex: 0,
+      endIndex: -1,
+      offsetTop: 0,
+      offsetBottom: 0,
+    }
+  }
+
+  const visibleStart = Math.floor(scrollTop / rowHeight)
+  const visibleCount = Math.ceil(viewportHeight / rowHeight)
+  const startIndex = Math.max(0, visibleStart - overscan)
+  const endIndex = Math.min(rowCount - 1, visibleStart + visibleCount + overscan - 1)
+  const offsetTop = startIndex * rowHeight
+  const offsetBottom = Math.max(0, (rowCount - endIndex - 1) * rowHeight)
+
+  return {
+    startIndex,
+    endIndex,
+    offsetTop,
+    offsetBottom,
+  }
 }
 
 export function buildConfigSaveRequest(document, editedRows) {

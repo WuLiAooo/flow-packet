@@ -71,6 +71,22 @@ export function mergeConfigRows(
   rows: ConfigTableRow[],
   editedRows: Map<number, Record<string, string>>,
 ): ConfigTableRow[]
+export function appendConfigRowsPage(
+  currentRows: ConfigTableRow[],
+  nextRows: ConfigTableRow[],
+): ConfigTableRow[]
+export function computeConfigVirtualWindow(args: {
+  rowCount: number
+  scrollTop: number
+  viewportHeight: number
+  rowHeight: number
+  overscan: number
+}): {
+  startIndex: number
+  endIndex: number
+  offsetTop: number
+  offsetBottom: number
+}
 export function buildConfigSaveRequest(
   document: ConfigTableDocumentLike,
   editedRows: Map<number, Record<string, string>>,

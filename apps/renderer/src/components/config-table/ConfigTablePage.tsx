@@ -9,8 +9,6 @@ import {
 } from 'react'
 import {
   Check,
-  ChevronLeft,
-  ChevronRight,
   ChevronsUpDown,
   FileCode2,
   FileSpreadsheet,
@@ -68,9 +66,11 @@ import {
 import {
   CONFIG_TABLE_ALL_COLUMNS,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
+  appendConfigRowsPage,
   buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
+  computeConfigVirtualWindow,
   decidePendingNavigation,
   filterConfigFiles,
   getConfigRowIDValue,
@@ -93,6 +93,8 @@ const sourceTypeLabels: Record<ConfigFileEntry['sourceType'], string> = {
   xml: 'XML',
   xlsx: 'XLSX',
 }
+const CONFIG_TABLE_ROW_HEIGHT = 48
+const CONFIG_TABLE_ROW_OVERSCAN = 8
 
 type PendingNavigation = PendingNavigationTarget
 
@@ -156,7 +158,10 @@ export function ConfigTablePage() {
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false)
   const [columnSheetOpen, setColumnSheetOpen] = useState(false)
   const [searchColumnOpen, setSearchColumnOpen] = useState(false)
+  const [tableScrollTop, setTableScrollTop] = useState(0)
+  const [tableViewportHeight, setTableViewportHeight] = useState(0)
   const didInitRef = useRef(false)
+  const tableScrollRef = useRef<HTMLDivElement | null>(null)
 
   const deferredFileSearch = useDeferredValue(fileSearch)
   const filteredFiles = useMemo(() => filterConfigFiles(files, activeFileType, deferredFileSearch), [activeFileType, deferredFileSearch, files])
@@ -164,16 +169,30 @@ export function ConfigTablePage() {
   const visibleColumns = useMemo(() => buildVisibleColumns(document?.columns ?? [], hiddenColumns), [document?.columns, hiddenColumns])
   const showStickyIDColumn = visibleColumns.includes('id')
   const dataColumns = useMemo(() => (showStickyIDColumn ? visibleColumns.filter((column) => column !== 'id') : visibleColumns), [showStickyIDColumn, visibleColumns])
+  const tableColumnCount = dataColumns.length + (showStickyIDColumn ? 1 : 0)
   const selectedFile = useMemo(() => files.find((file) => file.filePath === selectedFilePath) ?? null, [files, selectedFilePath])
   const displayedRows = useMemo(() => mergeConfigRows(document?.rows ?? [], editedRows), [document?.rows, editedRows])
   const displayedRowLookup = useMemo(() => new Map(displayedRows.map((row) => [row.rowIndex, row.values])), [displayedRows])
   const sourceRowLookup = useMemo(() => new Map((document?.rows ?? []).map((row) => [row.rowIndex, row.values])), [document?.rows])
+  const effectiveTableViewportHeight = tableViewportHeight > 0 ? tableViewportHeight : CONFIG_TABLE_ROW_HEIGHT * 8
+  const virtualWindow = useMemo(() => computeConfigVirtualWindow({
+    rowCount: displayedRows.length,
+    scrollTop: tableScrollTop,
+    viewportHeight: effectiveTableViewportHeight,
+    rowHeight: CONFIG_TABLE_ROW_HEIGHT,
+    overscan: CONFIG_TABLE_ROW_OVERSCAN,
+  }), [displayedRows.length, effectiveTableViewportHeight, tableScrollTop])
+  const virtualRows = useMemo(
+    () => (
+      virtualWindow.endIndex >= virtualWindow.startIndex
+        ? displayedRows.slice(virtualWindow.startIndex, virtualWindow.endIndex + 1)
+        : []
+    ),
+    [displayedRows, virtualWindow.endIndex, virtualWindow.startIndex],
+  )
   const isDirty = hasEditedRows(editedRows)
   const headerStats = useMemo(() => buildConfigTableStats(document, visibleColumns.length, isDirty), [document, visibleColumns.length, isDirty])
-  const pageCount = useMemo(() => (!document || document.totalRows <= 0 ? 1 : Math.max(1, Math.ceil(document.totalRows / document.limit))), [document])
-  const currentPage = useMemo(() => (!document || document.totalRows <= 0 ? 1 : Math.floor(document.offset / document.limit) + 1), [document])
-  const canGoPreviousPage = Boolean(document && document.offset > 0)
-  const canGoNextPage = Boolean(document && document.offset + document.rows.length < document.totalRows)
+  const canLoadMoreRows = Boolean(document && document.rows.length < document.totalRows)
   const selectedSearchColumnLabel = searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? '全部列' : searchForm.column
   const canResetSearch = searchForm.column !== CONFIG_TABLE_ALL_COLUMNS || searchForm.value !== '' || searchForm.exact
 
@@ -185,6 +204,14 @@ export function ConfigTablePage() {
     void switchRoot(DEFAULT_ROOT)
   }, [])
 
+  const resetTableScrollPosition = () => {
+    setTableScrollTop(0)
+    const target = tableScrollRef.current
+    if (target) {
+      target.scrollTop = 0
+    }
+  }
+
   const resetDocument = () => {
     setSelectedFilePath('')
     setDocument(null)
@@ -194,9 +221,11 @@ export function ConfigTablePage() {
     setColumnSheetOpen(false)
     setSearchColumnOpen(false)
     setActiveFileType('xml')
+    resetTableScrollPosition()
   }
 
   const applyDocument = (filePath: string, nextDocument: ConfigTableDocument) => {
+    resetTableScrollPosition()
     startTransition(() => {
       setSelectedFilePath(filePath)
       setDocument(nextDocument)
@@ -213,13 +242,16 @@ export function ConfigTablePage() {
     offset: number
     limit: number
     search?: ConfigTableSearch
-  }) => {
+  }, append = false) => {
+    if (!append) {
+      resetTableScrollPosition()
+    }
     startTransition(() => {
       setDocument((current) => current ? {
         ...current,
-        rows: rowsPage.rows,
+        rows: append ? appendConfigRowsPage(current.rows, rowsPage.rows) : rowsPage.rows,
         totalRows: rowsPage.totalRows,
-        offset: rowsPage.offset,
+        offset: append ? 0 : rowsPage.offset,
         limit: rowsPage.limit,
         search: rowsPage.search ?? current.search,
       } : current)
@@ -297,18 +329,18 @@ export function ConfigTablePage() {
     }
   }
 
-  const loadRowsPage = async (options: { offset?: number; search?: ConfigTableSearch } = {}) => {
+  const loadRowsPage = async (options: { offset?: number; search?: ConfigTableSearch; append?: boolean } = {}) => {
     if (!document) {
       return
     }
     setLoadingRows(true)
     try {
       const page = await listConfigDocumentRows(document.filePath, document.sheetName, {
-        offset: options.offset ?? document.offset,
+        offset: options.offset ?? (options.append ? document.rows.length : 0),
         limit: document.limit || DEFAULT_CONFIG_TABLE_PAGE_SIZE,
         search: options.search ?? document.search,
       })
-      applyRowsPage(page)
+      applyRowsPage(page, options.append === true)
     } catch {
       toast.error('加载表格数据失败', { id: TOAST_IDS.rows })
     } finally {
@@ -329,16 +361,6 @@ export function ConfigTablePage() {
       await saveConfigDocument(request)
       setEditedRows(new Map())
       toast.success('保存成功')
-      try {
-        const page = await listConfigDocumentRows(document.filePath, document.sheetName, {
-          offset: document.offset,
-          limit: document.limit,
-          search: document.search,
-        })
-        applyRowsPage(page)
-      } catch {
-        toast.error('加载表格数据失败', { id: TOAST_IDS.rows })
-      }
       return true
     } catch {
       toast.error('保存失败', { id: TOAST_IDS.save })
@@ -483,19 +505,40 @@ export function ConfigTablePage() {
     handleSearchSubmit()
   }
 
-  const handlePreviousPage = () => {
-    if (!document || !canGoPreviousPage) {
+  const maybeLoadMoreRows = (target: HTMLDivElement) => {
+    if (!document || loadingRows || openingDocument || !canLoadMoreRows) {
       return
     }
-    void loadRowsPage({ offset: Math.max(0, document.offset - document.limit) })
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight
+    if (remaining <= 120) {
+      void loadRowsPage({ append: true, offset: document.rows.length })
+    }
   }
 
-  const handleNextPage = () => {
-    if (!document || !canGoNextPage) {
+  useEffect(() => {
+    const target = tableScrollRef.current
+    if (!target) {
       return
     }
-    void loadRowsPage({ offset: document.offset + document.limit })
-  }
+    maybeLoadMoreRows(target)
+  }, [document?.rows.length, document?.totalRows, loadingRows, openingDocument])
+
+  useEffect(() => {
+    const target = tableScrollRef.current
+    if (!target) {
+      return
+    }
+
+    const updateViewport = () => setTableViewportHeight(target.clientHeight)
+    updateViewport()
+
+    const resizeObserver = new ResizeObserver(updateViewport)
+    resizeObserver.observe(target)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [document?.filePath, document?.sheetName])
 
   return (
     <>
@@ -659,11 +702,8 @@ export function ConfigTablePage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>第 {currentPage} / {pageCount} 页</span>
-                  <span>共 {document?.totalRows ?? 0} 条</span>
+                  <span>已加载 {document?.rows.length ?? 0} / {document?.totalRows ?? 0} 条</span>
                   {loadingRows ? <Loader2 className="size-4 animate-spin" /> : null}
-                  <Button variant="outline" size="icon-sm" onClick={handlePreviousPage} disabled={!canGoPreviousPage || loadingRows}><ChevronLeft className="size-4" /></Button>
-                  <Button variant="outline" size="icon-sm" onClick={handleNextPage} disabled={!canGoNextPage || loadingRows}><ChevronRight className="size-4" /></Button>
                 </div>
               </div>
             </div>
@@ -676,7 +716,14 @@ export function ConfigTablePage() {
               ) : visibleColumns.length === 0 ? (
                 <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">当前所有列都被隐藏了，请在“列显示”里至少勾选一列。</div>
               ) : (
-                <div className="h-full overflow-auto">
+                <div
+                  ref={tableScrollRef}
+                  onScroll={(event) => {
+                    setTableScrollTop(event.currentTarget.scrollTop)
+                    maybeLoadMoreRows(event.currentTarget)
+                  }}
+                  className="h-full overflow-auto"
+                >
                   <div className="min-w-max p-4">
                     <table className="min-w-full w-max caption-bottom text-sm">
                       <TableHeader>
@@ -686,22 +733,47 @@ export function ConfigTablePage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {displayedRows.length > 0 ? displayedRows.map((row) => (
-                          <TableRow key={`${document.filePath}-${document.sheetName ?? 'xml'}-${row.rowIndex}`}>
-                            {showStickyIDColumn ? <TableCell className="sticky left-0 z-20 w-24 min-w-24 border-r border-border bg-background/98 text-center text-xs font-medium text-foreground shadow-[10px_0_18px_-12px_rgba(15,23,42,0.34)]">{getConfigRowIDValue(row)}</TableCell> : null}
-                            {dataColumns.map((column) => (
-                              <TableCell key={`${row.rowIndex}-${column}`} className="min-w-40">
-                                <Input value={row.values[column] ?? ''} onChange={(event) => handleCellChange(row.rowIndex, column, event.target.value)} className="h-8 min-w-32 border-border/70 bg-background" />
-                              </TableCell>
+                        {displayedRows.length > 0 ? (
+                          <>
+                            {virtualWindow.offsetTop > 0 ? (
+                              <TableRow aria-hidden="true" className="border-0 hover:bg-transparent">
+                                <TableCell colSpan={tableColumnCount} className="h-0 border-0 p-0" style={{ height: virtualWindow.offsetTop }} />
+                              </TableRow>
+                            ) : null}
+
+                            {virtualRows.map((row) => (
+                              <TableRow key={`${document.filePath}-${document.sheetName ?? 'xml'}-${row.rowIndex}`} style={{ height: CONFIG_TABLE_ROW_HEIGHT }}>
+                                {showStickyIDColumn ? <TableCell className="sticky left-0 z-20 w-24 min-w-24 border-r border-border bg-background/98 text-center text-xs font-medium text-foreground shadow-[10px_0_18px_-12px_rgba(15,23,42,0.34)]">{getConfigRowIDValue(row)}</TableCell> : null}
+                                {dataColumns.map((column) => (
+                                  <TableCell key={`${row.rowIndex}-${column}`} className="min-w-40">
+                                    <Input value={row.values[column] ?? ''} onChange={(event) => handleCellChange(row.rowIndex, column, event.target.value)} className="h-8 min-w-32 border-border/70 bg-background" />
+                                  </TableCell>
+                                ))}
+                              </TableRow>
                             ))}
-                          </TableRow>
-                        )) : (
+
+                            {virtualWindow.offsetBottom > 0 ? (
+                              <TableRow aria-hidden="true" className="border-0 hover:bg-transparent">
+                                <TableCell colSpan={tableColumnCount} className="h-0 border-0 p-0" style={{ height: virtualWindow.offsetBottom }} />
+                              </TableRow>
+                            ) : null}
+                          </>
+                        ) : (
                           <TableRow>
-                            <TableCell colSpan={dataColumns.length + (showStickyIDColumn ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">{searchForm.value.trim() ? '当前搜索没有匹配数据。' : '当前文件没有可展示的数据。'}</TableCell>
+                            <TableCell colSpan={tableColumnCount} className="py-8 text-center text-sm text-muted-foreground">{searchForm.value.trim() ? '当前搜索没有匹配数据。' : '当前文件没有可展示的数据。'}</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
                     </table>
+                    <div className="pt-3 text-center text-xs text-muted-foreground">
+                      {loadingRows
+                        ? '正在加载更多数据...'
+                        : canLoadMoreRows
+                          ? '向下滚动继续加载'
+                          : document.totalRows > 0
+                            ? '已加载全部数据'
+                            : ''}
+                    </div>
                   </div>
                 </div>
               )}

@@ -1,12 +1,14 @@
-import test from 'node:test'
+﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  appendConfigRowsPage,
   CONFIG_TABLE_ALL_COLUMNS,
   CONFIG_TABLE_TAB_ID,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
   buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
+  computeConfigVirtualWindow,
   decidePendingNavigation,
   filterConfigFiles,
   getConfigRowIDValue,
@@ -32,6 +34,44 @@ test('mergeConfigRows overlays edited row values onto the currently loaded page'
   assert.deepEqual(mergeConfigRows(rows, editedRows), [
     { rowIndex: 1, values: { id: '2', name: 'boss_reward_new', groupid: '20' } },
   ])
+})
+
+test('appendConfigRowsPage appends the next page without duplicating existing rows', () => {
+  assert.deepEqual(
+    appendConfigRowsPage(
+      [
+        { rowIndex: 0, values: { id: '1' } },
+        { rowIndex: 1, values: { id: '2' } },
+      ],
+      [
+        { rowIndex: 1, values: { id: '2-new' } },
+        { rowIndex: 2, values: { id: '3' } },
+      ],
+    ),
+    [
+      { rowIndex: 0, values: { id: '1' } },
+      { rowIndex: 1, values: { id: '2' } },
+      { rowIndex: 2, values: { id: '3' } },
+    ],
+  )
+})
+
+test('computeConfigVirtualWindow returns an overscanned visible slice and spacer heights', () => {
+  assert.deepEqual(
+    computeConfigVirtualWindow({
+      rowCount: 100,
+      scrollTop: 480,
+      viewportHeight: 240,
+      rowHeight: 48,
+      overscan: 2,
+    }),
+    {
+      startIndex: 8,
+      endIndex: 16,
+      offsetTop: 384,
+      offsetBottom: 3984,
+    },
+  )
 })
 
 test('buildConfigSaveRequest converts edited rows into sorted row patches', () => {
@@ -81,10 +121,10 @@ test('buildConfigTableStats uses total rows for the compact header strip', () =>
   assert.deepEqual(
     buildConfigTableStats({ columns: ['id', 'name'], totalRows: 320 }, 1, true),
     [
-      { label: '列', value: '2' },
-      { label: '行', value: '320' },
-      { label: '显示', value: '1' },
-      { label: '状态', value: '未保存' },
+      { label: '\u5217', value: '2' },
+      { label: '\u884c', value: '320' },
+      { label: '\u663e\u793a', value: '1' },
+      { label: '\u72b6\u6001', value: '\u672a\u4fdd\u5b58' },
     ]
   )
 })
