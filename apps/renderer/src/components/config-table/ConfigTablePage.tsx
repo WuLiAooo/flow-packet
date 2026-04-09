@@ -56,6 +56,7 @@ import {
   listConfigDocumentRows,
   listConfigGroupFiles,
   openConfigDocument,
+  preflightConfigGroupUpdate,
   saveConfigDocument,
   scanConfigRoot,
   updateConfigGroup,
@@ -85,6 +86,7 @@ import {
   updateConfigHiddenColumns,
   type PendingNavigationTarget,
 } from './configTableDocument.js'
+import { ConfigGroupUpdateBlockedDialog } from './ConfigGroupUpdateBlockedDialog'
 import { UnsavedConfigDialog } from './UnsavedConfigDialog'
 
 const DEFAULT_ROOT = 'C:\\top-hero\\Meta'
@@ -165,6 +167,8 @@ export function ConfigTablePage() {
   const [updatingGroup, setUpdatingGroup] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null)
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false)
+  const [updateBlockedDialogOpen, setUpdateBlockedDialogOpen] = useState(false)
+  const [updateBlockedFiles, setUpdateBlockedFiles] = useState<string[]>([])
   const [columnSheetOpen, setColumnSheetOpen] = useState(false)
   const [searchColumnOpen, setSearchColumnOpen] = useState(false)
   const [tableScrollTop, setTableScrollTop] = useState(0)
@@ -546,6 +550,15 @@ export function ConfigTablePage() {
           }
         }
         closeCurrentDocument()
+      }
+
+      const preflight = await preflightConfigGroupUpdate(loadedRootPath, selectedGroup, activeFileType)
+      if (activeFileType === 'xlsx' && (preflight.lockedFiles?.length ?? 0) > 0) {
+        startTransition(() => {
+          setUpdateBlockedFiles(preflight.lockedFiles ?? [])
+          setUpdateBlockedDialogOpen(true)
+        })
+        return
       }
 
       await updateConfigGroup(loadedRootPath, selectedGroup, activeFileType)
@@ -941,6 +954,15 @@ export function ConfigTablePage() {
           </ScrollArea>
         </SheetContent>
       </Sheet>
+
+      <ConfigGroupUpdateBlockedDialog
+        open={updateBlockedDialogOpen}
+        files={updateBlockedFiles}
+        onClose={() => {
+          setUpdateBlockedDialogOpen(false)
+          setUpdateBlockedFiles([])
+        }}
+      />
 
       <UnsavedConfigDialog
         open={unsavedDialogOpen}

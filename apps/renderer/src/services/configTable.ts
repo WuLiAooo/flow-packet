@@ -21,10 +21,21 @@ export interface ConfigTableSearch {
   exact?: boolean
 }
 
+export interface ConfigGroupUpdatePreflightResult {
+  groupKey: string
+  sourceType: 'xml' | 'xlsx'
+  directory: string
+  updateMode?: 'svn' | 'tortoiseproc'
+  supportsAutoResolve?: boolean
+  lockedFiles?: string[]
+}
+
 export interface ConfigGroupUpdateResult {
   groupKey: string
   sourceType: 'xml' | 'xlsx'
   directory: string
+  updateMode?: 'svn' | 'tortoiseproc'
+  supportsAutoResolve?: boolean
   output?: string
 }
 
@@ -86,6 +97,10 @@ export function listConfigGroupFiles(rootPath: string, groupKey: string) {
   return sendRequest('configGroup.files', { rootPath, groupKey }) as Promise<{
     files: ConfigFileEntry[]
   }>
+}
+
+export function preflightConfigGroupUpdate(rootPath: string, groupKey: string, sourceType: ConfigFileEntry['sourceType']) {
+  return sendRequest('configGroup.updatePreflight', { rootPath, groupKey, sourceType }) as Promise<ConfigGroupUpdatePreflightResult>
 }
 
 export function updateConfigGroup(rootPath: string, groupKey: string, sourceType: ConfigFileEntry['sourceType']) {
