@@ -21,7 +21,7 @@ const (
 	synchronizeTimeShortName  = "CgSynchronizeTime"
 	loginTypeValue            = "test"
 	sessionSeqBase            = uint32(1)
-	loginResponseTimeout      = 5 * time.Second
+	loginResponseTimeout      = 0
 	synchronizeTimeInterval   = 8 * time.Minute
 )
 

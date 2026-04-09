@@ -174,6 +174,24 @@ func TestSeqContextWaitCanceled(t *testing.T) {
 	}
 }
 
+func TestSeqContextWaitWithoutTimeout(t *testing.T) {
+	ctx := NewSeqContext()
+	seq, ch := ctx.NextSeq()
+
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		ctx.Resolve(seq, []byte("response data"))
+	}()
+
+	data, err := ctx.WaitResponseContext(context.Background(), ch, 0)
+	if err != nil {
+		t.Fatalf("WaitResponseContext error: %v", err)
+	}
+	if string(data) != "response data" {
+		t.Fatalf("data = %q, want %q", data, "response data")
+	}
+}
+
 func TestSeqContextReset(t *testing.T) {
 	ctx := NewSeqContext()
 	ctx.NextSeq()

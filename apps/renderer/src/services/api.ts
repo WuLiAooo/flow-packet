@@ -153,7 +153,9 @@ export async function moveCollection(connectionId: string, id: string, folderId:
 }
 
 export async function loginDeviceSession(connectionId: string, deviceId: string) {
-  return sendRequest('session.login', { connectionId, deviceId })
+  return sendRequest('session.login', { connectionId, deviceId }, {
+    timeoutMs: 0,
+  })
 }
 
 export async function logoutDeviceSession(connectionId: string, deviceId: string) {

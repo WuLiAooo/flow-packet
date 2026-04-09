@@ -98,6 +98,15 @@ func (c *SeqContext) WaitResponse(ch chan []byte, timeout time.Duration) ([]byte
 
 // WaitResponseContext waits for a response until timeout or cancellation.
 func (c *SeqContext) WaitResponseContext(ctx context.Context, ch chan []byte, timeout time.Duration) ([]byte, error) {
+	if timeout <= 0 {
+		select {
+		case data := <-ch:
+			return data, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 

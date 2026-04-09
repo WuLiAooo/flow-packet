@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { LOCAL_API_EXECUTE_TIMEOUT_MESSAGE, LOCAL_API_LIST_LOAD_ERROR_TOAST_ID, getLocalApiExecuteErrorMessage, getLocalApiListLoadErrorMessage } from './localApiErrorMessage.js'
+import { createLocalApiExecutionStartState } from './localApiExecutionState.js'
 
 const resultHighlightClassName = 'rounded-sm bg-yellow-300 px-0.5 text-black transition-colors'
 const resultActiveHighlightClassName = 'bg-amber-400 ring-1 ring-amber-700'
@@ -403,6 +404,12 @@ export function LocalApiBrowser() {
     }
 
     const params = Object.fromEntries(paramEntries.map(([name]) => [name, paramValues[name] ?? '']))
+    const nextExecutionState = createLocalApiExecutionStartState({
+      result,
+      activeResultMatchIndex,
+    })
+    setResult(nextExecutionState.result)
+    setActiveResultMatchIndex(nextExecutionState.activeResultMatchIndex)
     setExecuting(true)
     try {
       const response = await executeLocalGameApi(selectedApi.cmd, params)
@@ -669,9 +676,3 @@ export function LocalApiBrowser() {
     </div>
   )
 }
-
-
-
-
-
-

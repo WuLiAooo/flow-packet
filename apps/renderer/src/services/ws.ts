@@ -1,3 +1,5 @@
+import { normalizeSendRequestTimeout } from './wsRequestTimeout.js'
+
 type EventCallback = (payload: unknown) => void
 
 export interface ClientMessage {
@@ -19,7 +21,7 @@ const MAX_RECONNECT = Infinity
 const RECONNECT_BASE = 1000
 const RECONNECT_MAX = 10000
 
-const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }>()
 
 export interface SendRequestOptions {
   timeoutMs?: number
@@ -88,12 +90,13 @@ export function sendRequest(action: string, payload?: unknown, options?: SendReq
     }
 
     const id = crypto.randomUUID()
-    const timeoutMs = options?.timeoutMs ?? 30000
-    const timeoutMessage = options?.timeoutMessage ?? 'Request timeout'
-    const timer = setTimeout(() => {
-      pendingRequests.delete(id)
-      reject(new Error(timeoutMessage))
-    }, timeoutMs)
+    const timeout = normalizeSendRequestTimeout(options)
+    const timer = timeout.enabled
+      ? setTimeout(() => {
+        pendingRequests.delete(id)
+        reject(new Error(timeout.timeoutMessage))
+      }, timeout.timeoutMs)
+      : null
 
     pendingRequests.set(id, { resolve, reject, timer })
 
@@ -118,7 +121,9 @@ function handleMessage(msg: ServerMessage) {
   if (msg.id && pendingRequests.has(msg.id)) {
     const pending = pendingRequests.get(msg.id)!
     pendingRequests.delete(msg.id)
-    clearTimeout(pending.timer)
+    if (pending.timer) {
+      clearTimeout(pending.timer)
+    }
 
     if (msg.event === 'error') {
       pending.reject(new Error((msg.payload as { message?: string })?.message || 'Unknown error'))
