@@ -15,7 +15,7 @@ export interface SavedConnection {
   updatedAt: number
 }
 
-export const TAG_OPTIONS = ['本地', '测试服', '正式服', '预发布'] as const
+export const TAG_OPTIONS = ['本地', '测试服'] as const
 
 export const COLOR_OPTIONS = [
   '#6366f1', // indigo
