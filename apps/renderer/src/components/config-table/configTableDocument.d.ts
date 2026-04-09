@@ -59,6 +59,11 @@ export const CONFIG_TABLE_TAB_ID: 'config-table'
 export const CONFIG_TABLE_ALL_COLUMNS: '__all__'
 export const DEFAULT_CONFIG_TABLE_PAGE_SIZE: 200
 
+export function choosePreferredConfigGroup(
+  groups: Array<{ groupKey?: string | null }> | null | undefined,
+  preferredGroupKey?: string,
+): string
+
 export function buildVisibleColumns(columns: string[], hiddenColumns: Set<string>): string[]
 export function createDocumentSnapshot(document: SnapshotDocument): string
 export function hasDocumentChanges(snapshot: string, document: SnapshotDocument): boolean
@@ -100,6 +105,17 @@ export function buildConfigColumnHeaderState(
   primaryLine: string
   bottomLines: string[]
 }
+export function isConfigColumnLockedVisible(column: string): boolean
+export function updateConfigHiddenColumns(
+  hiddenColumns: Set<string>,
+  column: string,
+  visible: boolean,
+): Set<string>
+export function resetConfigHiddenColumns(): Set<string>
+export function invertConfigColumnVisibility(
+  columns: string[],
+  hiddenColumns: Set<string>,
+): Set<string>
 export function buildConfigSaveRequest(
   document: ConfigTableDocumentLike,
   editedRows: Map<number, Record<string, string>>,

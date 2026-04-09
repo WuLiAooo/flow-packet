@@ -21,6 +21,13 @@ export interface ConfigTableSearch {
   exact?: boolean
 }
 
+export interface ConfigGroupUpdateResult {
+  groupKey: string
+  sourceType: 'xml' | 'xlsx'
+  directory: string
+  output?: string
+}
+
 export interface ConfigTableRow {
   rowIndex: number
   values: Record<string, string>
@@ -79,6 +86,10 @@ export function listConfigGroupFiles(rootPath: string, groupKey: string) {
   return sendRequest('configGroup.files', { rootPath, groupKey }) as Promise<{
     files: ConfigFileEntry[]
   }>
+}
+
+export function updateConfigGroup(rootPath: string, groupKey: string, sourceType: ConfigFileEntry['sourceType']) {
+  return sendRequest('configGroup.update', { rootPath, groupKey, sourceType }) as Promise<ConfigGroupUpdateResult>
 }
 
 export function openConfigDocument(filePath: string, sheetName?: string, query?: ConfigTableQuery) {

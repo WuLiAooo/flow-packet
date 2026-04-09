@@ -2,11 +2,15 @@
 import assert from 'node:assert/strict'
 import {
   appendConfigRowsPage,
+  choosePreferredConfigGroup,
   CONFIG_TABLE_ALL_COLUMNS,
   CONFIG_TABLE_TAB_ID,
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
   buildConfigColumnHeaderState,
   buildConfigSaveRequest,
+  invertConfigColumnVisibility,
+  resetConfigHiddenColumns,
+  updateConfigHiddenColumns,
   buildConfigTableStats,
   buildVisibleColumns,
   computeConfigVirtualWindow,
@@ -16,6 +20,25 @@ import {
   hasEditedRows,
   mergeConfigRows,
 } from '../src/components/config-table/configTableDocument.js'
+
+test('choosePreferredConfigGroup prefers meta_local when it exists', () => {
+  assert.equal(
+    choosePreferredConfigGroup([
+      { groupKey: 'meta_role' },
+      { groupKey: 'meta_local' },
+      { groupKey: 'meta_item' },
+    ]),
+    'meta_local',
+  )
+  assert.equal(
+    choosePreferredConfigGroup([
+      { groupKey: 'meta_role' },
+      { groupKey: 'meta_item' },
+    ]),
+    'meta_role',
+  )
+  assert.equal(choosePreferredConfigGroup([]), '')
+})
 
 test('buildVisibleColumns removes hidden columns only from presentation', () => {
   assert.deepEqual(
@@ -97,6 +120,22 @@ test('buildConfigColumnHeaderState promotes the english header line and keeps si
       primaryLine: 'groupid',
       bottomLines: [],
     },
+  )
+})
+
+test('column visibility bulk actions keep id always visible', () => {
+  assert.deepEqual([...resetConfigHiddenColumns()], [])
+  assert.deepEqual(
+    [...invertConfigColumnVisibility(['id', 'name', 'level'], new Set(['level']))].sort(),
+    ['name'],
+  )
+  assert.deepEqual(
+    [...updateConfigHiddenColumns(new Set(['id', 'level']), 'id', false)].sort(),
+    ['level'],
+  )
+  assert.deepEqual(
+    [...updateConfigHiddenColumns(new Set(['level']), 'name', false)].sort(),
+    ['level', 'name'],
   )
 })
 

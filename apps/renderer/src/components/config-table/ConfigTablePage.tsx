@@ -58,6 +58,7 @@ import {
   openConfigDocument,
   saveConfigDocument,
   scanConfigRoot,
+  updateConfigGroup,
   type ConfigFileEntry,
   type ConfigGroupSummary,
   type ConfigTableDocument,
@@ -68,6 +69,7 @@ import {
   DEFAULT_CONFIG_TABLE_PAGE_SIZE,
   appendConfigRowsPage,
   buildConfigColumnHeaderState,
+  choosePreferredConfigGroup,
   buildConfigSaveRequest,
   buildConfigTableStats,
   buildVisibleColumns,
@@ -76,7 +78,11 @@ import {
   filterConfigFiles,
   getConfigRowIDValue,
   hasEditedRows,
+  invertConfigColumnVisibility,
+  isConfigColumnLockedVisible,
   mergeConfigRows,
+  resetConfigHiddenColumns,
+  updateConfigHiddenColumns,
   type PendingNavigationTarget,
 } from './configTableDocument.js'
 import { UnsavedConfigDialog } from './UnsavedConfigDialog'
@@ -88,6 +94,7 @@ const TOAST_IDS = {
   open: 'config-document-open-error',
   rows: 'config-document-rows-error',
   save: 'config-document-save-error',
+  update: 'config-group-update-error',
 } as const
 
 const sourceTypeLabels: Record<ConfigFileEntry['sourceType'], string> = {
@@ -155,6 +162,7 @@ export function ConfigTablePage() {
   const [openingDocument, setOpeningDocument] = useState(false)
   const [loadingRows, setLoadingRows] = useState(false)
   const [savingDocument, setSavingDocument] = useState(false)
+  const [updatingGroup, setUpdatingGroup] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null)
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false)
   const [columnSheetOpen, setColumnSheetOpen] = useState(false)
@@ -204,7 +212,7 @@ export function ConfigTablePage() {
   const isDirty = hasEditedRows(editedRows)
   const headerStats = useMemo(() => buildConfigTableStats(document, visibleColumns.length, isDirty), [document, visibleColumns.length, isDirty])
   const canLoadMoreRows = Boolean(document && document.rows.length < document.totalRows)
-  const selectedSearchColumnLabel = searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? '全部列' : searchForm.column
+  const selectedSearchColumnLabel = searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? '\u5168\u90e8\u5217' : searchForm.column
   const canResetSearch = searchForm.column !== CONFIG_TABLE_ALL_COLUMNS || searchForm.value !== '' || searchForm.exact
 
   const renderColumnHeaderContent = (column: string, align: 'left' | 'center' = 'left') => {
@@ -241,7 +249,7 @@ export function ConfigTablePage() {
   const resetDocument = () => {
     setSelectedFilePath('')
     setDocument(null)
-    setHiddenColumns(new Set())
+    setHiddenColumns(resetConfigHiddenColumns())
     setEditedRows(new Map())
     setSearchForm(createDefaultSearchForm())
     setColumnSheetOpen(false)
@@ -255,9 +263,22 @@ export function ConfigTablePage() {
     startTransition(() => {
       setSelectedFilePath(filePath)
       setDocument(nextDocument)
-      setHiddenColumns(new Set())
+      setHiddenColumns(resetConfigHiddenColumns())
       setEditedRows(new Map())
       setSearchForm(mapSearchToForm(nextDocument.search))
+      setSearchColumnOpen(false)
+    })
+  }
+
+  const closeCurrentDocument = () => {
+    resetTableScrollPosition()
+    startTransition(() => {
+      setSelectedFilePath('')
+      setDocument(null)
+      setHiddenColumns(resetConfigHiddenColumns())
+      setEditedRows(new Map())
+      setSearchForm(createDefaultSearchForm())
+      setColumnSheetOpen(false)
       setSearchColumnOpen(false)
     })
   }
@@ -291,7 +312,7 @@ export function ConfigTablePage() {
     try {
       const groupResponse = await scanConfigRoot(normalizedRootPath)
       const nextGroups = groupResponse.groups
-      const nextGroup = nextGroups[0]?.groupKey ?? ''
+      const nextGroup = choosePreferredConfigGroup(nextGroups)
       let nextFiles: ConfigFileEntry[] = []
       if (nextGroup) {
         try {
@@ -310,7 +331,7 @@ export function ConfigTablePage() {
         resetDocument()
       })
     } catch {
-      toast.error('加载配置组失败', { id: TOAST_IDS.groups })
+      toast.error('???????', { id: TOAST_IDS.groups })
     } finally {
       setLoadingGroups(false)
     }
@@ -496,15 +517,48 @@ export function ConfigTablePage() {
   }
 
   const toggleColumnVisibility = (column: string, visible: boolean) => {
-    setHiddenColumns((current) => {
-      const next = new Set(current)
-      if (visible) {
-        next.delete(column)
-      } else {
-        next.add(column)
+    setHiddenColumns((current) => updateConfigHiddenColumns(current, column, visible))
+  }
+
+  const handleShowAllColumns = () => {
+    setHiddenColumns(resetConfigHiddenColumns())
+  }
+
+  const handleInvertColumns = () => {
+    if (!document) {
+      return
+    }
+    setHiddenColumns((current) => invertConfigColumnVisibility(document.columns, current))
+  }
+
+  const handleUpdateActiveSourceType = async () => {
+    if (!selectedGroup) {
+      return
+    }
+
+    setUpdatingGroup(true)
+    try {
+      if (activeFileType === 'xlsx' && document?.sourceType === 'xlsx') {
+        if (isDirty) {
+          const saved = await persistDocument()
+          if (!saved) {
+            return
+          }
+        }
+        closeCurrentDocument()
       }
-      return next
-    })
+
+      await updateConfigGroup(loadedRootPath, selectedGroup, activeFileType)
+      const response = await listConfigGroupFiles(loadedRootPath, selectedGroup)
+      startTransition(() => {
+        setFiles(response.files)
+      })
+      toast.success(activeFileType === 'xlsx' ? '\u5df2\u66f4\u65b0 XLSX \u6587\u4ef6\u5939' : '\u5df2\u66f4\u65b0 XML \u6587\u4ef6\u5939')
+    } catch {
+      toast.error(activeFileType === 'xlsx' ? '\u66f4\u65b0 XLSX \u6587\u4ef6\u5939\u5931\u8d25' : '\u66f4\u65b0 XML \u6587\u4ef6\u5939\u5931\u8d25', { id: TOAST_IDS.update })
+    } finally {
+      setUpdatingGroup(false)
+    }
   }
 
   const handleSearchSubmit = () => {
@@ -602,9 +656,15 @@ export function ConfigTablePage() {
           </div>
 
           <div className="border-b border-border px-4 py-3">
-            <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
-              <button type="button" onClick={() => setActiveFileType('xml')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xml' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XML</button>
-              <button type="button" onClick={() => setActiveFileType('xlsx')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xlsx' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XLSX</button>
+            <div className="flex items-center justify-between gap-2">
+              <div className="inline-flex rounded-lg border border-border bg-muted/20 p-1">
+                <button type="button" onClick={() => setActiveFileType('xml')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xml' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XML</button>
+                <button type="button" onClick={() => setActiveFileType('xlsx')} className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', activeFileType === 'xlsx' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>XLSX</button>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void handleUpdateActiveSourceType()} disabled={!selectedGroup || loadingGroups || loadingFiles || openingDocument || savingDocument || updatingGroup}>
+                {updatingGroup ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                {'\u66f4\u65b0'}
+              </Button>
             </div>
           </div>
 
@@ -698,12 +758,12 @@ export function ConfigTablePage() {
                     {document ? (
                       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
                         <Command>
-                          <CommandInput placeholder="搜索列名" />
+                          <CommandInput placeholder={'\u641c\u7d22\u5217\u540d'} />
                           <CommandList>
-                            <CommandEmpty>没有匹配列名</CommandEmpty>
+                            <CommandEmpty>{'\u6ca1\u6709\u5339\u914d\u5217\u540d'}</CommandEmpty>
                             <CommandGroup>
-                              <CommandItem value="全部列" onSelect={() => { setSearchForm((current) => ({ ...current, column: CONFIG_TABLE_ALL_COLUMNS })); setSearchColumnOpen(false) }}>
-                                <Check className={cn('mr-2 size-4', searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? 'opacity-100' : 'opacity-0')} />全部列
+                              <CommandItem value="\u5168\u90e8\u5217" onSelect={() => { setSearchForm((current) => ({ ...current, column: CONFIG_TABLE_ALL_COLUMNS })); setSearchColumnOpen(false) }}>
+                                <Check className={cn('mr-2 size-4', searchForm.column === CONFIG_TABLE_ALL_COLUMNS ? 'opacity-100' : 'opacity-0')} />{'\u5168\u90e8\u5217'}
                               </CommandItem>
                               {document.columns.map((column) => (
                                 <CommandItem key={column} value={column} onSelect={() => { setSearchForm((current) => ({ ...current, column })); setSearchColumnOpen(false) }}>
@@ -819,24 +879,75 @@ export function ConfigTablePage() {
       <Sheet open={columnSheetOpen} onOpenChange={setColumnSheetOpen}>
         <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
           <SheetHeader className="border-b border-border px-5 py-4">
-            <SheetTitle className="flex items-center gap-2 text-base"><SlidersHorizontal className="size-4 text-primary" />列显示控制</SheetTitle>
-            <SheetDescription>默认全选。取消后只隐藏展示，不影响实际保存内容。</SheetDescription>
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <SlidersHorizontal className="size-4 text-primary" />{'\u5217\u663e\u793a\u63a7\u5236'}
+            </SheetTitle>
+            <SheetDescription>{'\u9ed8\u8ba4\u5168\u9009\u3002\u53d6\u6d88\u540e\u53ea\u9690\u85cf\u5c55\u793a\uff0c\u4e0d\u5f71\u54cd\u5b9e\u9645\u4fdd\u5b58\u5185\u5bb9\u3002'}</SheetDescription>
           </SheetHeader>
-          <div className="border-b border-border px-5 py-3 text-xs text-muted-foreground">共 {document?.columns.length ?? 0} 列，当前显示 {visibleColumns.length} 列</div>
+
+          <div className="border-b border-border px-5 py-3 text-xs text-muted-foreground">
+            {'\u5171 '}{document?.columns.length ?? 0}{' \u5217\uff0c\u5f53\u524d\u663e\u793a '}{visibleColumns.length}{' \u5217'}
+          </div>
+
+          <div className="border-b border-border px-5 py-3">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={handleShowAllColumns}
+                disabled={!document?.columns.length}
+              >
+                {'\u5168\u9009'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={handleInvertColumns}
+                disabled={!document?.columns.length}
+              >
+                {'\u53cd\u5411\u5168\u9009'}
+              </Button>
+            </div>
+          </div>
+
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-2 px-5 py-4">
-              {document?.columns.length ? document.columns.map((column) => (
-                <label key={column} className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-sm text-foreground">
-                  <Checkbox checked={!hiddenColumns.has(column)} onCheckedChange={(checked) => toggleColumnVisibility(column, checked === true)} />
-                  <span className="min-w-0 flex-1 break-all">{column}</span>
-                </label>
-              )) : <div className="px-1 py-2 text-sm text-muted-foreground">打开文件后可选择要展示的列。</div>}
+              {document?.columns.length ? document.columns.map((column) => {
+                const lockedVisible = isConfigColumnLockedVisible(column)
+                return (
+                  <label
+                    key={column}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-sm',
+                      lockedVisible ? 'bg-muted/35 text-muted-foreground' : 'text-foreground',
+                    )}
+                  >
+                    <Checkbox
+                      checked={!hiddenColumns.has(column)}
+                      disabled={lockedVisible}
+                      onCheckedChange={(checked) => toggleColumnVisibility(column, checked === true)}
+                    />
+                    <span className="min-w-0 flex-1 break-all">{column}</span>
+                  </label>
+                )
+              }) : (
+                <div className="px-1 py-2 text-sm text-muted-foreground">{'\u6253\u5f00\u6587\u4ef6\u540e\u53ef\u9009\u62e9\u8981\u5c55\u793a\u7684\u5217\u3002'}</div>
+              )}
             </div>
           </ScrollArea>
         </SheetContent>
       </Sheet>
 
-      <UnsavedConfigDialog open={unsavedDialogOpen} onCancel={handleCancelPendingNavigation} onDiscardAndSwitch={handleDiscardAndSwitch} onSaveAndSwitch={() => void handleSaveAndSwitch()} />
+      <UnsavedConfigDialog
+        open={unsavedDialogOpen}
+        onCancel={handleCancelPendingNavigation}
+        onDiscardAndSwitch={handleDiscardAndSwitch}
+        onSaveAndSwitch={() => void handleSaveAndSwitch()}
+      />
     </>
   )
 }

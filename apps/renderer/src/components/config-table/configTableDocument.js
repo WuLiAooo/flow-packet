@@ -2,6 +2,13 @@
 export const CONFIG_TABLE_ALL_COLUMNS = '__all__'
 export const DEFAULT_CONFIG_TABLE_PAGE_SIZE = 200
 
+export function choosePreferredConfigGroup(groups, preferredGroupKey = 'meta_local') {
+  if (!Array.isArray(groups) || groups.length === 0) {
+    return ''
+  }
+  return groups.find((group) => group?.groupKey === preferredGroupKey)?.groupKey ?? groups[0].groupKey ?? ''
+}
+
 export function buildVisibleColumns(columns, hiddenColumns) {
   return columns.filter((column) => !hiddenColumns.has(column))
 }
@@ -104,6 +111,41 @@ export function buildConfigColumnHeaderState(column, columnMeta) {
     primaryLine: primaryIndex >= 0 ? (normalizedLines[primaryIndex] || column) : column,
     bottomLines: primaryIndex >= 0 ? normalizedLines.slice(primaryIndex + 1).filter(Boolean) : [],
   }
+}
+
+export function isConfigColumnLockedVisible(column) {
+  return column === 'id'
+}
+
+export function updateConfigHiddenColumns(hiddenColumns, column, visible) {
+  const next = new Set(hiddenColumns)
+  if (isConfigColumnLockedVisible(column)) {
+    next.delete(column)
+    return next
+  }
+  if (visible) {
+    next.delete(column)
+  } else {
+    next.add(column)
+  }
+  return next
+}
+
+export function resetConfigHiddenColumns() {
+  return new Set()
+}
+
+export function invertConfigColumnVisibility(columns, hiddenColumns) {
+  const next = new Set()
+  for (const column of columns) {
+    if (isConfigColumnLockedVisible(column)) {
+      continue
+    }
+    if (!hiddenColumns.has(column)) {
+      next.add(column)
+    }
+  }
+  return next
 }
 
 export function buildConfigSaveRequest(document, editedRows) {
