@@ -1,4 +1,4 @@
-﻿import { useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import {
   Plug,
@@ -76,8 +76,8 @@ interface WelcomePageProps {
 const tagColors: Record<string, string> = {
   '本地': 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
   '测试服': 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  '正式服': 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-  '预发布': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
+//   '正式服': 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+//   '预发布': 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
 }
 
 function DragHandle({ id }: { id: string }) {
@@ -315,7 +315,7 @@ export function WelcomePage({ onEnterConnection, onEnterConfigTable }: WelcomePa
               orientation="vertical"
               className="mx-1 data-[orientation=vertical]:h-4"
             />
-            <h1 className="text-base font-medium">杩炴帴绠＄悊</h1>
+            <h1 className="text-base font-medium">{'\u8fde\u63a5\u7ba1\u7406'}</h1>
 
             <div className="ml-auto flex items-center gap-2">
               <div className="relative">
@@ -323,7 +323,7 @@ export function WelcomePage({ onEnterConnection, onEnterConfigTable }: WelcomePa
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="鎼滅储杩炴帴..."
+                  placeholder={'\u641c\u7d22\u8fde\u63a5...'}
                   className="h-8 w-[200px] pl-8 text-sm"
                 />
               </div>
@@ -338,14 +338,12 @@ export function WelcomePage({ onEnterConnection, onEnterConfigTable }: WelcomePa
           {connections.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full">
               <img src="./remind.png" alt="remind" className="size-32 -mb-9 object-contain" />
-              <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight text-muted-foreground">
-                暂无连接，点击“快速添加”开始
-              </h3>
+              <h3 className="scroll-m-20 text-2xl font-semibold tracking-tight text-muted-foreground">{'\u6682\u65e0\u8fde\u63a5\uff0c\u70b9\u51fb\u201c\u5feb\u901f\u6dfb\u52a0\u201d\u5f00\u59cb'}</h3>
             </div>
           ) : filteredConnections.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
               <Plug className="size-10 mb-3 opacity-30" />
-              <p className="text-sm">没有匹配的连接</p>
+              <p className="text-sm">{'\u6ca1\u6709\u5339\u914d\u7684\u8fde\u63a5'}</p>
             </div>
           ) : (
             <div className="overflow-hidden rounded-lg border bg-background/80 backdrop-blur-sm">
@@ -390,14 +388,14 @@ export function WelcomePage({ onEnterConnection, onEnterConfigTable }: WelcomePa
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>纭鍒犻櫎</AlertDialogTitle>
+            <AlertDialogTitle>{'\u786e\u8ba4\u5220\u9664'}</AlertDialogTitle>
             <AlertDialogDescription>
-              纭畾瑕佸垹闄よ繛鎺?"{deleteTarget?.name}" 鍚楋紵姝ゆ搷浣滀笉鍙挙閿€銆?
+              {'\u786e\u5b9a\u8981\u5220\u9664\u8fde\u63a5 "'}{deleteTarget?.name}{'" \u5417\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>鍙栨秷</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>鍒犻櫎</AlertDialogAction>
+            <AlertDialogCancel>{'\u53d6\u6d88'}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>{'\u5220\u9664'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
